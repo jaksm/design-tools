@@ -5,9 +5,10 @@
 // ── Stitch Client Types ─────────────────────────────────────────────────────
 
 export interface StitchClientConfig {
-  apiKey?: string;
-  accessToken?: string;
-  projectId?: string;
+  /** GoogleAuth instance for ADC. If not provided, one is created with cloud-platform scope. */
+  auth?: import('google-auth-library').GoogleAuth;
+  /** GCP quota project ID (sent as x-goog-user-project header). */
+  quotaProjectId?: string;
   baseUrl?: string;
   timeout?: number;
 }

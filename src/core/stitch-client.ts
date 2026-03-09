@@ -1,8 +1,10 @@
 /**
  * StitchClient — Direct HTTP JSON-RPC 2.0 client for Google Stitch API.
+ * Uses google-auth-library ADC (Application Default Credentials) for auth.
  * No MCP SDK, no mcporter. Pure fetch.
  */
 
+import { GoogleAuth } from 'google-auth-library';
 import {
   type StitchClientConfig,
   type JsonRpcRequest,
@@ -18,27 +20,51 @@ import {
 } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://stitch.googleapis.com/mcp';
-const DEFAULT_TIMEOUT = 180_000; // 3 minutes for generation
+const DEFAULT_TIMEOUT = 600_000; // 10 minutes for generation
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000; // 1 second
 
 export class StitchClient {
-  private readonly apiKey?: string;
-  private readonly accessToken?: string;
-  private readonly projectId?: string;
+  private readonly auth: GoogleAuth;
+  private readonly quotaProjectId?: string;
   private readonly baseUrl: string;
   private readonly timeout: number;
   private requestId = 0;
 
   constructor(config: StitchClientConfig) {
-    this.apiKey = config.apiKey;
-    this.accessToken = config.accessToken;
-    this.projectId = config.projectId;
-    if (!this.apiKey && !this.accessToken) {
-      throw new StitchAuthError('Either apiKey or accessToken must be provided');
-    }
+    this.auth = config.auth ?? new GoogleAuth({
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    });
+    this.quotaProjectId = config.quotaProjectId;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     this.timeout = config.timeout ?? DEFAULT_TIMEOUT;
+  }
+
+  /**
+   * Get a fresh Bearer token from ADC.
+   */
+  private async getAccessToken(): Promise<string> {
+    try {
+      const client = await this.auth.getClient();
+      const tokenResponse = await client.getAccessToken();
+      const token = typeof tokenResponse === 'string'
+        ? tokenResponse
+        : tokenResponse?.token;
+      if (!token) {
+        throw new StitchAuthError(
+          'ADC returned no access token. Run: gcloud auth application-default login',
+          401,
+        );
+      }
+      return token;
+    } catch (error) {
+      if (error instanceof StitchAuthError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new StitchAuthError(
+        `Failed to obtain ADC credentials: ${message}. Run: gcloud auth application-default login`,
+        401,
+      );
+    }
   }
 
   /**
@@ -78,6 +104,9 @@ export class StitchClient {
   }
 
   private async executeRequest(body: JsonRpcRequest): Promise<unknown> {
+    // Get fresh token for each request attempt (auto-refresh)
+    const accessToken = await this.getAccessToken();
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
@@ -88,10 +117,8 @@ export class StitchClient {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json, text/event-stream',
-          ...(this.accessToken
-            ? { 'Authorization': `Bearer ${this.accessToken}` }
-            : { 'X-Goog-Api-Key': this.apiKey! }),
-          ...(this.projectId ? { 'x-goog-user-project': this.projectId } : {}),
+          'Authorization': `Bearer ${accessToken}`,
+          ...(this.quotaProjectId ? { 'x-goog-user-project': this.quotaProjectId } : {}),
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -138,7 +165,7 @@ export class StitchClient {
     switch (response.status) {
       case 401:
         throw new StitchAuthError(
-          errorMessage || 'Unauthorized — invalid or expired API key',
+          errorMessage || 'Unauthorized — invalid or expired credentials. Run: gcloud auth application-default login',
           401,
         );
       case 403:

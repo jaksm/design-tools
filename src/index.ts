@@ -32,7 +32,8 @@ export { StitchClient } from './core/stitch-client.js';
 export { CatalogManager } from './core/catalog-manager.js';
 export { FileDownloadManager } from './core/file-manager.js';
 export { ScreenRegistryManager } from './core/screen-registry.js';
-export { activate, getMissingApiKeyError } from './adapter.js';
+export { DesignConfig } from './core/design-config.js';
+export { activate } from './adapter.js';
 export { designCatalog } from './tools/design-catalog.js';
 export { designVision } from './tools/design-vision.js';
 export { GeminiVisionClient } from './core/gemini-client.js';
@@ -55,6 +56,7 @@ export type {
   DesignProjectsParams,
   DesignScreensParams,
   DesignCreateProjectParams,
+  StitchToolsContext,
 } from './tools/stitch-tools.js';
 
 // Re-export types
@@ -115,10 +117,11 @@ export default function register(api: OpenClawPluginApi): void {
 
     // Initialize Stitch tools context (once per session)
     if (!_stitchToolsCtx) {
-      const stitchApiKey = context.config.get('stitch.apiKey') || process.env.STITCH_API_KEY || null;
-      const stitchClient = stitchApiKey ? new StitchClient({ apiKey: stitchApiKey }) : null;
-      const defaultProjectId = context.config.get('stitch.defaultProjectId') || process.env.STITCH_DEFAULT_PROJECT_ID || undefined;
-      _stitchToolsCtx = createStitchToolsContext(stitchClient, projectRoot, defaultProjectId);
+      const quotaProjectId = context.config.get('stitch.quotaProjectId') || process.env.STITCH_QUOTA_PROJECT_ID || undefined;
+      const stitchClient = new StitchClient({
+        ...(quotaProjectId ? { quotaProjectId } : {}),
+      });
+      _stitchToolsCtx = createStitchToolsContext(stitchClient, projectRoot);
     }
 
     // Initialize Gemini client (lazy — only when design_vision is called)
@@ -221,8 +224,7 @@ export default function register(api: OpenClawPluginApi): void {
             projectId: { type: 'string', description: 'Stitch project ID (uses default if not provided)' },
             title: { type: 'string', description: 'Screen title (auto-derived from Stitch response if not provided)' },
             platform: { type: 'string', enum: ['ios', 'android', 'web'], description: 'Target platform (maps to device type)' },
-            colorMode: { type: 'string', enum: ['light', 'dark'], description: 'Color mode for the generated screen' },
-            customColor: { type: 'string', description: 'Custom primary color (hex)' },
+            modelId: { type: 'string', enum: ['GEMINI_3_PRO', 'GEMINI_3_FLASH'], description: 'AI model to use for generation' },
           },
           required: ['prompt'],
         },
@@ -239,6 +241,7 @@ export default function register(api: OpenClawPluginApi): void {
             screenId: { type: 'string', description: 'Stitch screen ID to edit (required)' },
             editPrompt: { type: 'string', description: 'Edit instructions (required)' },
             projectId: { type: 'string', description: 'Stitch project ID (looked up from registry if not provided)' },
+            modelId: { type: 'string', enum: ['GEMINI_3_PRO', 'GEMINI_3_FLASH'], description: 'AI model to use for editing' },
           },
           required: ['screenId', 'editPrompt'],
         },

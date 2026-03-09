@@ -1,7 +1,9 @@
 /**
  * StitchClient tests — TC-SC-01 through TC-SC-19
+ * Updated: Uses GoogleAuth ADC (mocked) instead of API key.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { GoogleAuth } from 'google-auth-library';
 import { StitchClient } from '../../src/core/stitch-client.js';
 import {
   StitchAuthError,
@@ -49,6 +51,28 @@ function httpError(status: number, body?: Record<string, unknown>) {
   } as unknown as Response;
 }
 
+/**
+ * Create a mock GoogleAuth that returns a fixed token.
+ */
+function mockGoogleAuth(token = 'mock-adc-token'): GoogleAuth {
+  return {
+    getClient: async () => ({
+      getAccessToken: async () => ({ token }),
+    }),
+  } as unknown as GoogleAuth;
+}
+
+/**
+ * Create a mock GoogleAuth that fails.
+ */
+function mockGoogleAuthFailing(errorMsg = 'ADC not configured'): GoogleAuth {
+  return {
+    getClient: async () => {
+      throw new Error(errorMsg);
+    },
+  } as unknown as GoogleAuth;
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('StitchClient', () => {
@@ -69,36 +93,53 @@ describe('StitchClient', () => {
     const expected = { tools: [{ name: 'test' }] };
     fetchSpy.mockResolvedValueOnce(jsonRpcSuccess(expected));
 
-    const client = new StitchClient({ apiKey: 'test-key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     const result = await client.callTool('tools/list', {});
 
     expect(result).toEqual(expected);
   });
 
-  // TC-SC-02: API key sent as X-Goog-Api-Key header
-  it('TC-SC-02: API key sent as X-Goog-Api-Key header', async () => {
+  // TC-SC-02: Bearer token sent as Authorization header (ADC)
+  it('TC-SC-02: Bearer token sent as Authorization header', async () => {
     fetchSpy.mockResolvedValueOnce(jsonRpcSuccess('ok'));
 
-    const client = new StitchClient({ apiKey: 'test-api-key-abc123' });
+    const client = new StitchClient({ auth: mockGoogleAuth('my-adc-token-123') });
     await client.callTool('test', {});
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [, init] = fetchSpy.mock.calls[0]!;
     const headers = (init as RequestInit).headers as Record<string, string>;
-    expect(headers['X-Goog-Api-Key']).toBe('test-api-key-abc123');
+    expect(headers['Authorization']).toBe('Bearer my-adc-token-123');
 
-    // Verify no API key in URL or body
-    const url = fetchSpy.mock.calls[0]![0] as string;
-    expect(url).not.toContain('test-api-key-abc123');
-    const body = JSON.parse((init as RequestInit).body as string);
-    expect(JSON.stringify(body)).not.toContain('test-api-key-abc123');
+    // Verify no API key header
+    expect(headers).not.toHaveProperty('X-Goog-Api-Key');
+  });
+
+  // TC-SC-02b: quota project header sent when configured
+  it('TC-SC-02b: quota project sent as x-goog-user-project header', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonRpcSuccess('ok'));
+
+    const client = new StitchClient({ auth: mockGoogleAuth(), quotaProjectId: 'my-gcp-project' });
+    await client.callTool('test', {});
+
+    const [, init] = fetchSpy.mock.calls[0]!;
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers['x-goog-user-project']).toBe('my-gcp-project');
+  });
+
+  // TC-SC-02c: ADC failure throws StitchAuthError
+  it('TC-SC-02c: ADC failure throws StitchAuthError with helpful message', async () => {
+    const client = new StitchClient({ auth: mockGoogleAuthFailing('Could not load credentials') });
+
+    await expect(client.callTool('test', {})).rejects.toThrow(StitchAuthError);
+    await expect(client.callTool('test', {})).rejects.toThrow(/gcloud auth application-default login/);
   });
 
   // TC-SC-03: Request body is valid JSON-RPC 2.0
   it('TC-SC-03: request body is valid JSON-RPC 2.0', async () => {
     fetchSpy.mockResolvedValueOnce(jsonRpcSuccess('ok'));
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     await client.callTool('someMethod', { param1: 'value' });
 
     const [, init] = fetchSpy.mock.calls[0]!;
@@ -117,7 +158,7 @@ describe('StitchClient', () => {
   it('TC-SC-04: request URL is the Stitch endpoint', async () => {
     fetchSpy.mockResolvedValueOnce(jsonRpcSuccess('ok'));
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     await client.callTool('test', {});
 
     const url = fetchSpy.mock.calls[0]![0];
@@ -139,7 +180,7 @@ describe('StitchClient', () => {
       });
     });
 
-    const client = new StitchClient({ apiKey: 'key', timeout: 50 });
+    const client = new StitchClient({ auth: mockGoogleAuth(), timeout: 50 });
     const promise = client.callTool('slow/method', {});
 
     await expect(promise).rejects.toThrow(StitchTimeoutError);
@@ -148,25 +189,20 @@ describe('StitchClient', () => {
     vi.useFakeTimers();
   });
 
-  // TC-SC-06: Default timeout applies when none configured
-  it('TC-SC-06: default timeout is 60s', () => {
-    vi.useRealTimers(); // Can't fake-timer 60s reliably
+  // TC-SC-06: Default timeout is 600s (10 minutes)
+  it('TC-SC-06: default timeout is 600s', () => {
+    vi.useRealTimers();
 
-    // Verify the client uses 60s default by constructing without timeout
-    // and checking it passes an AbortSignal to fetch
     let capturedSignal: AbortSignal | undefined;
     fetchSpy.mockImplementation((_url, init) => {
       capturedSignal = (init as RequestInit).signal as AbortSignal;
-      // Immediately resolve to avoid waiting
       return Promise.resolve(jsonRpcSuccess('ok'));
     });
 
-    const client = new StitchClient({ apiKey: 'key' });
-    // The default timeout is 60s — verified via documentation and constructor.
-    // We confirm a signal is passed (timeout mechanism active).
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     return client.callTool('test', {}).then(() => {
       expect(capturedSignal).toBeDefined();
-      expect(capturedSignal!.aborted).toBe(false); // Not aborted yet — completed before timeout
+      expect(capturedSignal!.aborted).toBe(false);
       vi.useFakeTimers();
     });
   });
@@ -182,7 +218,7 @@ describe('StitchClient', () => {
       return jsonRpcSuccess({ ok: true });
     });
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     const promise = client.callTool('test', {});
 
     // First call happens immediately, returns 429
@@ -204,7 +240,7 @@ describe('StitchClient', () => {
 
   // TC-SC-08: 429 on all retries — throws rate limit error
   it('TC-SC-08: 429 on all retries throws rate limit error', async () => {
-    vi.useRealTimers(); // Use real timers with a patched short delay client
+    vi.useRealTimers();
 
     let callCount = 0;
     fetchSpy.mockImplementation(async () => {
@@ -212,8 +248,7 @@ describe('StitchClient', () => {
       return httpError(429, { error: { message: 'Rate limit' } });
     });
 
-    // Use a very short timeout so real retries are fast
-    const client = new StitchClient({ apiKey: 'key', timeout: 5000 });
+    const client = new StitchClient({ auth: mockGoogleAuth(), timeout: 5000 });
 
     // Monkey-patch the sleep to be instant for this test
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -233,7 +268,7 @@ describe('StitchClient', () => {
       return httpError(500);
     });
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     await expect(client.callTool('test', {})).rejects.toThrow(StitchError);
     expect(callCount).toBe(1);
   });
@@ -245,7 +280,7 @@ describe('StitchClient', () => {
       return httpError(400);
     });
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     await expect(client.callTool('test', {})).rejects.toThrow();
     expect(callCount).toBe(1);
   });
@@ -257,7 +292,7 @@ describe('StitchClient', () => {
       return httpError(401);
     });
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     await expect(client.callTool('test', {})).rejects.toThrow();
     expect(callCount).toBe(1);
   });
@@ -269,7 +304,7 @@ describe('StitchClient', () => {
       return httpError(403);
     });
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     await expect(client.callTool('test', {})).rejects.toThrow();
     expect(callCount).toBe(1);
   });
@@ -280,7 +315,7 @@ describe('StitchClient', () => {
       httpError(400, { error: { message: 'Invalid request parameter' } }),
     );
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     try {
       await client.callTool('test', {});
       expect.unreachable('Should have thrown');
@@ -296,14 +331,14 @@ describe('StitchClient', () => {
   it('TC-SC-11: HTTP 401 throws StitchAuthError', async () => {
     fetchSpy.mockResolvedValueOnce(httpError(401));
 
-    const client = new StitchClient({ apiKey: 'bad-key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     try {
       await client.callTool('test', {});
       expect.unreachable('Should have thrown');
     } catch (error) {
       expect(error).toBeInstanceOf(StitchAuthError);
       const e = error as StitchAuthError;
-      expect(e.message).toMatch(/unauthorized|api key|authentication/i);
+      expect(e.message).toMatch(/unauthorized|credentials|authentication/i);
       expect(e.statusCode).toBe(401);
     }
   });
@@ -312,7 +347,7 @@ describe('StitchClient', () => {
   it('TC-SC-12: HTTP 403 throws StitchPermissionError', async () => {
     fetchSpy.mockResolvedValueOnce(httpError(403));
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     try {
       await client.callTool('test', {});
       expect.unreachable('Should have thrown');
@@ -329,7 +364,7 @@ describe('StitchClient', () => {
   it('TC-SC-13: HTTP 500 throws immediately', async () => {
     fetchSpy.mockResolvedValueOnce(httpError(500));
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     try {
       await client.callTool('test', {});
       expect.unreachable('Should have thrown');
@@ -344,7 +379,7 @@ describe('StitchClient', () => {
   it('TC-SC-14: network failure throws StitchNetworkError', async () => {
     fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     try {
       await client.callTool('test', {});
       expect.unreachable('Should have thrown');
@@ -358,7 +393,7 @@ describe('StitchClient', () => {
   it('TC-SC-15: DNS failure throws StitchNetworkError', async () => {
     fetchSpy.mockRejectedValueOnce(new TypeError('getaddrinfo ENOTFOUND stitch.googleapis.com'));
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     try {
       await client.callTool('test', {});
       expect.unreachable('Should have thrown');
@@ -378,7 +413,7 @@ describe('StitchClient', () => {
       text: async () => 'this is not json {{{',
     } as unknown as Response);
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     await expect(client.callTool('test', {})).rejects.toThrow(StitchParseError);
   });
 
@@ -386,7 +421,7 @@ describe('StitchClient', () => {
   it('TC-SC-17: JSON-RPC error response throws StitchRpcError', async () => {
     fetchSpy.mockResolvedValueOnce(jsonRpcError(-32600, 'Invalid Request'));
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     try {
       await client.callTool('test', {});
       expect.unreachable('Should have thrown');
@@ -408,11 +443,11 @@ describe('StitchClient', () => {
       text: async () => JSON.stringify({ jsonrpc: '2.0', id: 1 }),
     } as unknown as Response);
 
-    const client = new StitchClient({ apiKey: 'key' });
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     await expect(client.callTool('test', {})).rejects.toThrow(StitchParseError);
   });
 
-  // TC-SC-19 (P2): Response id mismatch — our sequential client ignores this
+  // TC-SC-19: Response id mismatch — our sequential client ignores this
   it('TC-SC-19: response id mismatch is tolerated (sequential client)', async () => {
     fetchSpy.mockResolvedValueOnce({
       ok: true,
@@ -422,9 +457,37 @@ describe('StitchClient', () => {
       text: async () => JSON.stringify({ jsonrpc: '2.0', id: 999, result: 'ok' }),
     } as unknown as Response);
 
-    const client = new StitchClient({ apiKey: 'key' });
-    // Should not throw — sequential client tolerates id mismatch
+    const client = new StitchClient({ auth: mockGoogleAuth() });
     const result = await client.callTool('test', {});
     expect(result).toBe('ok');
+  });
+
+  // TC-SC-20: Token auto-refresh — each request gets fresh token
+  it('TC-SC-20: each request gets a fresh token from GoogleAuth', async () => {
+    let tokenCount = 0;
+    const auth = {
+      getClient: async () => ({
+        getAccessToken: async () => ({ token: `token-${++tokenCount}` }),
+      }),
+    } as unknown as GoogleAuth;
+
+    fetchSpy.mockResolvedValue(jsonRpcSuccess('ok'));
+
+    const client = new StitchClient({ auth });
+    await client.callTool('test1', {});
+    await client.callTool('test2', {});
+
+    expect(tokenCount).toBe(2);
+    const headers1 = (fetchSpy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    const headers2 = (fetchSpy.mock.calls[1]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers1['Authorization']).toBe('Bearer token-1');
+    expect(headers2['Authorization']).toBe('Bearer token-2');
+  });
+
+  // TC-SC-21: Constructor without auth creates default GoogleAuth
+  it('TC-SC-21: constructor without explicit auth creates default GoogleAuth', () => {
+    // Should not throw — creates its own GoogleAuth internally
+    const client = new StitchClient({});
+    expect(client).toBeDefined();
   });
 });

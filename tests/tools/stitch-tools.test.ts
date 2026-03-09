@@ -26,11 +26,24 @@ import {
   type StitchToolsContext,
 } from '../../src/tools/stitch-tools.js';
 import { StitchClient } from '../../src/core/stitch-client.js';
+import { DesignConfig } from '../../src/core/design-config.js';
+import { GoogleAuth } from 'google-auth-library';
 import {
   StitchError,
   StitchAuthError,
   StitchRateLimitError,
 } from '../../src/core/types.js';
+
+/**
+ * Create a mock GoogleAuth that returns a fixed token.
+ */
+function mockGoogleAuth(token = 'mock-adc-token'): GoogleAuth {
+  return {
+    getClient: async () => ({
+      getAccessToken: async () => ({ token }),
+    }),
+  } as unknown as GoogleAuth;
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -190,12 +203,18 @@ async function seedCatalogWithScreen(
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stitch-tools-test-'));
 
-  // Create a real StitchClient then mock its callTool method
-  const client = new StitchClient({ apiKey: 'test-api-key' });
+  // Write default design-config.json with the default project ID
+  await fs.writeFile(
+    path.join(tmpDir, 'design-config.json'),
+    JSON.stringify({ stitchProjectId: DEFAULT_PROJECT_ID }),
+  );
+
+  // Create a real StitchClient (with mock auth) then mock its callTool method
+  const client = new StitchClient({ auth: mockGoogleAuth() });
   mockCallTool = vi.fn();
   client.callTool = mockCallTool;
 
-  ctx = createStitchToolsContext(client, tmpDir, DEFAULT_PROJECT_ID);
+  ctx = createStitchToolsContext(client, tmpDir);
   fetchSpy = vi.spyOn(globalThis, 'fetch');
   mockFetchForDownloads();
 });
@@ -310,18 +329,20 @@ describe('design_generate', () => {
   });
 
   // TC-GEN-07
-  it('TC-GEN-07: no default projectId AND no projectId returns error', async () => {
-    const ctxNoDefault = createStitchToolsContext(
-      new StitchClient({ apiKey: 'test-key' }),
-      tmpDir,
-      undefined, // no default
-    );
+  it('TC-GEN-07: no config file AND no projectId returns error', async () => {
+    // Create temp dir without design-config.json
+    const tmpNoConfig = await fs.mkdtemp(path.join(os.tmpdir(), 'stitch-noconfig-'));
+    const client = new StitchClient({ auth: mockGoogleAuth() });
+    client.callTool = mockCallTool;
+    const ctxNoConfig = createStitchToolsContext(client, tmpNoConfig);
 
-    const result = await designGenerate({ prompt: 'Splash screen' }, ctxNoDefault);
+    const result = await designGenerate({ prompt: 'Splash screen' }, ctxNoConfig);
 
     expect(result.success).toBe(false);
     expect((result as any).error).toContain('No projectId provided');
     expect(mockCallTool).not.toHaveBeenCalled();
+
+    await fs.rm(tmpNoConfig, { recursive: true, force: true });
   });
 
   // TC-GEN-08
@@ -976,15 +997,16 @@ describe('design_projects', () => {
     expect((result as any).code).toBe('STITCH_API_ERROR');
   });
 
-  // TC-PROJ-04
-  it('TC-PROJ-04: missing API key returns actionable error', async () => {
-    const ctxNoKey = createStitchToolsContext(null, tmpDir);
+  // TC-PROJ-04 (updated: ADC error instead of missing API key)
+  it('TC-PROJ-04: ADC failure surfaces auth error', async () => {
+    const failClient = new StitchClient({ auth: mockGoogleAuth() });
+    failClient.callTool = vi.fn().mockRejectedValue(new StitchAuthError('ADC not configured', 401));
+    const ctxFail = createStitchToolsContext(failClient, tmpDir);
 
-    const result = await designProjects({}, ctxNoKey);
+    const result = await designProjects({}, ctxFail);
 
     expect(result.success).toBe(false);
-    expect((result as any).error).toContain('Stitch API key not configured');
-    expect((result as any).code).toBe('no-api-key');
+    expect((result as any).error).toContain('Failed to list projects');
   });
 
   // TC-PROJ-05
@@ -1247,15 +1269,19 @@ describe('design_create_project', () => {
     expect(result.title).toBe('MyApp');
   });
 
-  // TC-CREATE-07
-  it('TC-CREATE-07: missing API key returns error before HTTP call', async () => {
-    const ctxNoKey = createStitchToolsContext(null, tmpDir);
+  // TC-CREATE-07 (updated: verify project ID auto-saved to config)
+  it('TC-CREATE-07: created project ID auto-saved to design-config.json', async () => {
+    mockCallTool.mockResolvedValue({ id: 'proj-auto-saved', name: 'AutoSaved' });
 
-    const result = await designCreateProject({ title: 'Test' }, ctxNoKey);
+    const result = await designCreateProject({ title: 'AutoSaved' }, ctx) as any;
 
-    expect(result.success).toBe(false);
-    expect((result as any).error).toContain('Stitch API key not configured');
-    expect((result as any).code).toBe('no-api-key');
+    expect(result.success).toBe(true);
+    expect(result.projectId).toBe('proj-auto-saved');
+    expect(result.configSaved).toBe(true);
+
+    // Verify config file was written
+    const config = JSON.parse(await fs.readFile(path.join(tmpDir, 'design-config.json'), 'utf-8'));
+    expect(config.stitchProjectId).toBe('proj-auto-saved');
   });
 });
 
@@ -1457,13 +1483,10 @@ describe('integration', () => {
 describe('cross-cutting', () => {
   // TC-CROSS-01
   it('TC-CROSS-01: all error responses have { success: false, error, code } shape', async () => {
-    const ctxNoKey = createStitchToolsContext(null, tmpDir);
-
     const errors = await Promise.all([
       designGenerate({ prompt: '' }, ctx),
       designEdit({ screenId: '' } as any, ctx),
       designGet({}, ctx),
-      designProjects({}, ctxNoKey),
       designCreateProject({} as any, ctx),
     ]);
 
@@ -1500,26 +1523,25 @@ describe('cross-cutting', () => {
     expect(genResult.success).toBe(true);
   });
 
-  // TC-CROSS-03
-  it('TC-CROSS-03: missing API key returns actionable error on all Stitch-dependent tools', async () => {
-    const ctxNoKey = createStitchToolsContext(null, tmpDir);
+  // TC-CROSS-03 (updated: ADC auth is always present, test that Stitch errors propagate correctly)
+  it('TC-CROSS-03: Stitch API errors surface correctly on all Stitch-dependent tools', async () => {
+    const failClient = new StitchClient({ auth: mockGoogleAuth() });
+    failClient.callTool = vi.fn().mockRejectedValue(new StitchError('Service unavailable', { statusCode: 503 }));
+    const ctxFail = createStitchToolsContext(failClient, tmpDir);
 
     const results = await Promise.all([
-      designGenerate({ prompt: 'test' }, ctxNoKey),
-      designEdit({ screenId: 'abc', editPrompt: 'test' }, ctxNoKey),
-      designGet({ screenId: 'abc' }, ctxNoKey),
-      designProjects({}, ctxNoKey),
-      designCreateProject({ title: 'test' }, ctxNoKey),
+      designGenerate({ prompt: 'test' }, ctxFail),
+      designProjects({}, ctxFail),
+      designCreateProject({ title: 'test' }, ctxFail),
     ]);
 
     for (const result of results) {
       expect(result.success).toBe(false);
-      expect((result as any).error).toContain('Stitch API key not configured');
-      expect((result as any).code).toBe('no-api-key');
+      expect((result as any).error).toBeDefined();
     }
 
-    // design_screens should still work (local registry)
-    const screensResult = await designScreens({}, ctxNoKey);
+    // design_screens should still work (local registry, no Stitch call)
+    const screensResult = await designScreens({}, ctxFail);
     expect(screensResult.success).toBe(true);
   });
 
@@ -1584,20 +1606,19 @@ describe('cross-cutting', () => {
   });
 
   // TC-CROSS-09
-  it('TC-CROSS-09: all tools handle null input gracefully', async () => {
-    const results = await Promise.all([
-      designGenerate(null as any, ctx),
-      designEdit(null as any, ctx),
-      designGet(null as any, ctx),
-      designProjects(null as any, ctx),
-      designScreens(null as any, ctx),
-      designCreateProject(null as any, ctx),
-    ]);
+  it('TC-CROSS-09: all tools handle null/undefined input gracefully', async () => {
+    const results: any[] = [];
+    // Each of these should return a structured response, not throw
+    results.push(await designGenerate(null as any, ctx));
+    results.push(await designEdit(null as any, ctx));
+    results.push(await designGet(null as any, ctx));
+    results.push(await designProjects(null as any, ctx));
+    results.push(await designScreens(null as any, ctx));
+    results.push(await designCreateProject(null as any, ctx));
 
-    // None should throw unhandled exceptions — all should return structured responses
     for (const result of results) {
       expect(result).toBeDefined();
-      expect(typeof (result as any).success).toBe('boolean');
+      expect(typeof result.success).toBe('boolean');
     }
   });
 
@@ -1834,5 +1855,109 @@ describe('response parsing', () => {
     const callArgs = mockCallTool.mock.calls[0]![1] as Record<string, unknown>;
     expect(callArgs).toHaveProperty('selectedScreenIds', ['screen-abc']);
     expect(callArgs).not.toHaveProperty('screenIds');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 11. Design Config Tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('design-config', () => {
+  it('resolves projectId from design-config.json when not passed explicitly', async () => {
+    // The default beforeEach already writes design-config.json with DEFAULT_PROJECT_ID
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
+
+    const result = await designGenerate({ prompt: 'Test' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(mockCallTool).toHaveBeenCalledWith('generate_screen_from_text', expect.objectContaining({
+      projectId: DEFAULT_PROJECT_ID,
+    }));
+  });
+
+  it('explicit projectId overrides config file', async () => {
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
+
+    await designGenerate({ prompt: 'Test', projectId: 'explicit-proj' }, ctx);
+
+    expect(mockCallTool).toHaveBeenCalledWith('generate_screen_from_text', expect.objectContaining({
+      projectId: 'explicit-proj',
+    }));
+  });
+
+  it('design_create_project auto-saves projectId to config', async () => {
+    mockCallTool.mockResolvedValue({ id: 'new-proj-id', name: 'New Project' });
+
+    const result = await designCreateProject({ title: 'New Project' }, ctx) as any;
+    expect(result.success).toBe(true);
+    expect(result.configSaved).toBe(true);
+
+    // Read config and verify
+    const config = JSON.parse(await fs.readFile(path.join(tmpDir, 'design-config.json'), 'utf-8'));
+    expect(config.stitchProjectId).toBe('new-proj-id');
+  });
+
+  it('subsequent generate uses auto-saved projectId from create', async () => {
+    // First: create project (auto-saves to config)
+    mockCallTool.mockResolvedValueOnce({ id: 'auto-saved-proj', name: 'AutoProject' });
+    await designCreateProject({ title: 'AutoProject' }, ctx);
+
+    // Then: generate without projectId — should use auto-saved one
+    mockCallTool.mockResolvedValueOnce(makeStitchGenerationResponse());
+    await designGenerate({ prompt: 'Test screen' }, ctx);
+
+    expect(mockCallTool).toHaveBeenLastCalledWith('generate_screen_from_text', expect.objectContaining({
+      projectId: 'auto-saved-proj',
+    }));
+  });
+
+  it('missing config file and no explicit projectId → error', async () => {
+    const tmpNoConfig = await fs.mkdtemp(path.join(os.tmpdir(), 'stitch-noconfig-'));
+    const client = new StitchClient({ auth: mockGoogleAuth() });
+    client.callTool = mockCallTool;
+    const ctxNoConfig = createStitchToolsContext(client, tmpNoConfig);
+
+    const result = await designGenerate({ prompt: 'Test' }, ctxNoConfig);
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain('No projectId provided');
+    expect((result as any).error).toContain('design_create_project');
+
+    await fs.rm(tmpNoConfig, { recursive: true, force: true });
+  });
+
+  it('DesignConfig.read returns empty object for missing file', async () => {
+    const tmpEmpty = await fs.mkdtemp(path.join(os.tmpdir(), 'stitch-empty-'));
+    const config = new DesignConfig(tmpEmpty);
+    const data = await config.read();
+    expect(data).toEqual({});
+    await fs.rm(tmpEmpty, { recursive: true, force: true });
+  });
+
+  it('DesignConfig.update merges with existing config', async () => {
+    const config = new DesignConfig(tmpDir);
+    await config.update({ quotaProjectId: 'my-gcp-project' });
+
+    const data = await config.read();
+    expect(data.stitchProjectId).toBe(DEFAULT_PROJECT_ID); // preserved
+    expect(data.quotaProjectId).toBe('my-gcp-project'); // added
+  });
+
+  it('DesignConfig.resolveProjectId uses resolution chain', async () => {
+    const config = new DesignConfig(tmpDir);
+
+    // Explicit takes precedence
+    const explicit = await config.resolveProjectId('explicit');
+    expect(explicit).toBe('explicit');
+
+    // Falls back to config
+    const fromConfig = await config.resolveProjectId();
+    expect(fromConfig).toBe(DEFAULT_PROJECT_ID);
+
+    // No config → null
+    const tmpEmpty = await fs.mkdtemp(path.join(os.tmpdir(), 'stitch-resolve-'));
+    const emptyConfig = new DesignConfig(tmpEmpty);
+    const fromEmpty = await emptyConfig.resolveProjectId();
+    expect(fromEmpty).toBeNull();
+    await fs.rm(tmpEmpty, { recursive: true, force: true });
   });
 });

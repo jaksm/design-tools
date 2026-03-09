@@ -1,26 +1,41 @@
 /**
  * E2E Integration Test — Real Stitch + Gemini APIs
  * Run: npx tsx e2e-test.ts
+ * Uses ADC (Application Default Credentials) — no gcloud shell calls.
  */
 import { StitchClient } from './src/core/stitch-client.js';
 import { CatalogManager } from './src/core/catalog-manager.js';
 import { GeminiVisionClient } from './src/core/gemini-client.js';
-import { execSync } from 'child_process';
+import { GoogleAuth } from 'google-auth-library';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const GEMINI_KEY = process.env.GOOGLE_PLACES_API_KEY || process.env.GEMINI_API_KEY || '';
-let ACCESS_TOKEN = '';
-try { ACCESS_TOKEN = execSync('gcloud auth print-access-token', { encoding: 'utf8' }).trim(); } catch {}
 const PROJECT_ROOT = '/tmp/e2e-design-tools-test';
 // Use the existing swiftui-experiment-1 project (mobile) for mobile tests
 const STITCH_MOBILE_PROJECT = '307477256142191053';
+
+// ADC auth — no shell calls
+const auth = new GoogleAuth({
+  scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+});
+
+let quotaProjectId: string | undefined;
+let hasADC = false;
+try {
+  const client = await auth.getClient();
+  const token = await client.getAccessToken();
+  hasADC = !!token;
+  quotaProjectId = await auth.getProjectId() ?? undefined;
+} catch {
+  hasADC = false;
+}
 
 // Clean + setup
 if (fs.existsSync(PROJECT_ROOT)) fs.rmSync(PROJECT_ROOT, { recursive: true });
 fs.mkdirSync(path.join(PROJECT_ROOT, 'design-artifacts', 'screens'), { recursive: true });
 
-const stitch = new StitchClient({ accessToken: ACCESS_TOKEN, projectId: 'savvy-generator-486813-d1' });
+const stitch = new StitchClient({ auth, quotaProjectId });
 const catalog = new CatalogManager(PROJECT_ROOT);
 
 const results: Array<{ test: string; status: string; detail?: string }> = [];
@@ -42,10 +57,11 @@ async function downloadFile(url: string, destPath: string): Promise<number> {
 
 async function run() {
   console.log('\n🔬 E2E Integration Test — OpenClaw Design Tools\n');
-  console.log(`Stitch token: ${ACCESS_TOKEN ? '✅ present' : '❌ missing'}`);
+  console.log(`ADC auth: ${hasADC ? '✅ present' : '❌ missing'}`);
+  console.log(`Quota project: ${quotaProjectId ?? '(none)'}`);
   console.log(`Gemini key: ${GEMINI_KEY ? '✅ present' : '❌ missing'}`);
   console.log(`Test dir: ${PROJECT_ROOT}\n`);
-  if (!ACCESS_TOKEN) { console.log('⚠️ No gcloud token'); return; }
+  if (!hasADC) { console.log('⚠️ No ADC credentials. Run: gcloud auth application-default login'); return; }
 
   await catalog.init();
 
@@ -67,7 +83,6 @@ async function run() {
       mobileScreenId = screen.id;
       log('Generate mobile screen', 'PASS', `id: ${mobileScreenId}`);
 
-      // Download HTML
       const htmlUrl = screen?.htmlCode?.downloadUrl;
       if (htmlUrl) {
         const htmlPath = path.join(PROJECT_ROOT, 'design-artifacts', 'screens', 'fitness-dashboard', 'v1.html');
@@ -75,7 +90,6 @@ async function run() {
         log('Download HTML', 'PASS', `${bytes} bytes`);
       }
 
-      // Download screenshot
       const pngUrl = screen?.screenshot?.downloadUrl;
       if (pngUrl) {
         const pngPath = path.join(PROJECT_ROOT, 'design-artifacts', 'screens', 'fitness-dashboard', 'v1.png');
@@ -84,7 +98,6 @@ async function run() {
         log('Download screenshot', 'PASS', `${bytes} bytes`);
       }
 
-      // Catalog registration
       await catalog.addEntry({
         id: 'fitness-dashboard',
         screen: 'fitness-dashboard',
@@ -261,7 +274,6 @@ async function run() {
     walkDir(path.join(PROJECT_ROOT, 'design-artifacts'));
   } catch {}
 
-  // Show screenshots
   console.log('\n📸 Screenshots:');
   [mobileScreenshot, desktopScreenshot].filter(Boolean).forEach(p => console.log(`  ${p}`));
 }

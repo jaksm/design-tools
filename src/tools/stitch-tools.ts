@@ -1,8 +1,8 @@
 /**
- * Stitch Native Tools — 6 tools for direct Stitch API integration.
+ * Stitch Native Tools — 7 tools for direct Stitch API integration.
  *
- * design_generate, design_edit, design_get, design_projects,
- * design_screens, design_create_project
+ * design_generate, design_variants, design_edit, design_get,
+ * design_projects, design_screens, design_create_project
  *
  * All tools follow the { success: true/false, ... } response pattern.
  * All Stitch-dependent tools check for API key before making calls.
@@ -13,6 +13,7 @@ import path from 'node:path';
 import { StitchClient } from '../core/stitch-client.js';
 import { FileDownloadManager } from '../core/file-manager.js';
 import { ScreenRegistryManager } from '../core/screen-registry.js';
+import { DesignConfig } from '../core/design-config.js';
 import {
   StitchError,
   StitchAuthError,
@@ -38,8 +39,6 @@ type ToolResult = SuccessResult | ErrorResult;
 
 const VALID_PLATFORMS = ['ios', 'android', 'web'] as const;
 type Platform = (typeof VALID_PLATFORMS)[number];
-
-const VALID_COLOR_MODES = ['light', 'dark'] as const;
 
 const PLATFORM_TO_DEVICE_TYPE: Record<Platform, string> = {
   ios: 'MOBILE',
@@ -153,6 +152,16 @@ export interface DesignGenerateParams {
   [key: string]: unknown;
 }
 
+export interface DesignVariantsParams {
+  screenId?: string;
+  projectId?: string;
+  modelId?: string;
+  variantCount?: number;
+  creativeRange?: string;
+  aspects?: string[];
+  [key: string]: unknown;
+}
+
 export interface DesignEditParams {
   screenId?: string;
   editPrompt?: string;
@@ -185,11 +194,11 @@ export interface DesignCreateProjectParams {
 // ── Tool Context ────────────────────────────────────────────────────────────
 
 export interface StitchToolsContext {
-  stitchClient: StitchClient | null;
+  stitchClient: StitchClient;
   fileManager: FileDownloadManager;
   screenRegistry: ScreenRegistryManager;
+  designConfig: DesignConfig;
   projectRoot: string;
-  defaultProjectId?: string;
 }
 
 // ── Catalog Integration ─────────────────────────────────────────────────────
@@ -336,14 +345,6 @@ export async function designGenerate(
   ctx: StitchToolsContext,
 ): Promise<ToolResult> {
   try {
-    // Validate API key
-    if (!ctx.stitchClient) {
-      return err(
-        'Stitch API key not configured. Set `STITCH_API_KEY` in your `.env` file.',
-        'no-api-key',
-      );
-    }
-
     // Validate required params
     if (params.prompt === undefined || params.prompt === null) {
       return err('Missing required parameter: `prompt`', 'MISSING_PARAM');
@@ -352,11 +353,11 @@ export async function designGenerate(
       return err('Parameter `prompt` cannot be empty', 'INVALID_PARAM');
     }
 
-    // Resolve projectId
-    const projectId = params.projectId ?? ctx.defaultProjectId;
+    // Resolve projectId via resolution chain: explicit → config → error
+    const projectId = await ctx.designConfig.resolveProjectId(params.projectId);
     if (!projectId) {
       return err(
-        'No projectId provided and no default project configured. Provide `projectId` or set a default in plugin config.',
+        'No projectId provided and no default project configured. Provide `projectId` or create a project with `design_create_project` (auto-saves to design-config.json).',
         'MISSING_PARAM',
       );
     }
@@ -506,14 +507,6 @@ export async function designEdit(
   ctx: StitchToolsContext,
 ): Promise<ToolResult> {
   try {
-    // Validate API key
-    if (!ctx.stitchClient) {
-      return err(
-        'Stitch API key not configured. Set `STITCH_API_KEY` in your `.env` file.',
-        'no-api-key',
-      );
-    }
-
     // Validate required params
     if (!params.screenId) {
       return err('Missing required parameter: `screenId`', 'MISSING_PARAM');
@@ -685,14 +678,6 @@ export async function designGet(
   ctx: StitchToolsContext,
 ): Promise<ToolResult> {
   try {
-    // Validate API key
-    if (!ctx.stitchClient) {
-      return err(
-        'Stitch API key not configured. Set `STITCH_API_KEY` in your `.env` file.',
-        'no-api-key',
-      );
-    }
-
     // Validate required params
     if (!params.screenId) {
       return err('Missing required parameter: `screenId`', 'MISSING_PARAM');
@@ -787,14 +772,6 @@ export async function designProjects(
   ctx: StitchToolsContext,
 ): Promise<ToolResult> {
   try {
-    // Validate API key
-    if (!ctx.stitchClient) {
-      return err(
-        'Stitch API key not configured. Set `STITCH_API_KEY` in your `.env` file.',
-        'no-api-key',
-      );
-    }
-
     let result: unknown;
     try {
       result = await ctx.stitchClient.callTool('list_projects', {});
@@ -883,14 +860,6 @@ export async function designCreateProject(
   ctx: StitchToolsContext,
 ): Promise<ToolResult> {
   try {
-    // Validate API key
-    if (!ctx.stitchClient) {
-      return err(
-        'Stitch API key not configured. Set `STITCH_API_KEY` in your `.env` file.',
-        'no-api-key',
-      );
-    }
-
     // Validate required params
     if (params.title === undefined || params.title === null) {
       return err('Missing required parameter: `title`', 'MISSING_PARAM');
@@ -924,10 +893,14 @@ export async function designCreateProject(
       return err('Stitch API returned no project ID', 'STITCH_API_ERROR');
     }
 
+    // Auto-save project ID to design-config.json
+    await ctx.designConfig.update({ stitchProjectId: projectId });
+
     return {
       success: true,
       projectId,
       title: projectTitle,
+      configSaved: true,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -941,15 +914,14 @@ export async function designCreateProject(
  * Create a StitchToolsContext for use with all 6 tools.
  */
 export function createStitchToolsContext(
-  stitchClient: StitchClient | null,
+  stitchClient: StitchClient,
   projectRoot: string,
-  defaultProjectId?: string,
 ): StitchToolsContext {
   return {
     stitchClient,
     fileManager: new FileDownloadManager(projectRoot),
     screenRegistry: new ScreenRegistryManager(projectRoot),
+    designConfig: new DesignConfig(projectRoot),
     projectRoot,
-    defaultProjectId,
   };
 }

@@ -285,27 +285,8 @@ describe('Plugin Registration', () => {
     expect((registeredTools[0] as Array<{ name: string }>)[7]!.name).toBe('design_create_project');
   });
 
-  // TC-PR-03: API key from OC config
-  it('TC-PR-03: API key from config', async () => {
-    const { activate } = await import('../../src/adapter.js');
-
-    const context = {
-      config: { get: (key: string) => key === 'stitch.apiKey' ? 'key-from-config' : undefined },
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    };
-
-    // Remove env var to isolate
-    const originalEnv = process.env.STITCH_API_KEY;
-    delete process.env.STITCH_API_KEY;
-
-    const result = activate(context, tmpDir);
-    expect(result.apiKey).toBe('key-from-config');
-
-    process.env.STITCH_API_KEY = originalEnv;
-  });
-
-  // TC-PR-04: API key from env when not in config
-  it('TC-PR-04: API key from env variable', async () => {
+  // TC-PR-03: ADC-based auth — no API key needed, always creates StitchClient
+  it('TC-PR-03: activate always creates StitchClient (ADC auth)', async () => {
     const { activate } = await import('../../src/adapter.js');
 
     const context = {
@@ -313,74 +294,54 @@ describe('Plugin Registration', () => {
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     };
 
-    const originalEnv = process.env.STITCH_API_KEY;
-    process.env.STITCH_API_KEY = 'key-from-env';
-
     const result = activate(context, tmpDir);
-    expect(result.apiKey).toBe('key-from-env');
-
-    if (originalEnv) {
-      process.env.STITCH_API_KEY = originalEnv;
-    } else {
-      delete process.env.STITCH_API_KEY;
-    }
+    expect(result.stitchClient).toBeDefined();
+    expect(result.stitchClient).not.toBeNull();
   });
 
-  // TC-PR-05: Config takes precedence over env
-  it('TC-PR-05: config takes precedence over env', async () => {
+  // TC-PR-04: quota project from config
+  it('TC-PR-04: quota project from config is passed to StitchClient', async () => {
     const { activate } = await import('../../src/adapter.js');
 
     const context = {
-      config: { get: (key: string) => key === 'stitch.apiKey' ? 'key-from-config' : undefined },
+      config: { get: (key: string) => key === 'stitch.quotaProjectId' ? 'my-gcp-project' : undefined },
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     };
 
-    const originalEnv = process.env.STITCH_API_KEY;
-    process.env.STITCH_API_KEY = 'key-from-env';
-
     const result = activate(context, tmpDir);
-    expect(result.apiKey).toBe('key-from-config');
-
-    if (originalEnv) {
-      process.env.STITCH_API_KEY = originalEnv;
-    } else {
-      delete process.env.STITCH_API_KEY;
-    }
+    expect(result.stitchClient).toBeDefined();
+    // StitchClient is created — quota project is internal config
   });
 
-  // TC-PR-06: Missing API key — plugin loads but warns
-  it('TC-PR-06: missing API key loads with warning, stitchClient is null', async () => {
-    const { activate, getMissingApiKeyError } = await import('../../src/adapter.js');
+  // TC-PR-05: activate without any config still works (ADC handles auth)
+  it('TC-PR-05: activate without config still works', async () => {
+    const { activate } = await import('../../src/adapter.js');
 
-    const warnSpy = vi.fn();
     const context = {
       config: { get: () => undefined },
-      logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     };
 
-    const originalEnv = process.env.STITCH_API_KEY;
-    delete process.env.STITCH_API_KEY;
-
     const result = activate(context, tmpDir);
+    expect(result.stitchClient).toBeDefined();
+    expect(result.catalogManager).toBeDefined();
+    expect(result.fileManager).toBeDefined();
+  });
 
-    // Plugin loads — no crash
-    expect(result.stitchClient).toBeNull();
-    expect(result.apiKey).toBeNull();
+  // TC-PR-06: activate logs ADC info message
+  it('TC-PR-06: activate logs ADC activation message', async () => {
+    const { activate } = await import('../../src/adapter.js');
 
-    // Warning logged
-    expect(warnSpy).toHaveBeenCalled();
-    expect(warnSpy.mock.calls[0]![0]).toMatch(/stitch.*api.*key/i);
+    const infoSpy = vi.fn();
+    const context = {
+      config: { get: () => undefined },
+      logger: { info: infoSpy, warn: vi.fn(), error: vi.fn() },
+    };
 
-    // Actionable error message available
-    const errorMsg = getMissingApiKeyError();
-    expect(errorMsg).toMatch(/stitch.*api.*key/i);
-    expect(errorMsg).toMatch(/STITCH_API_KEY/);
+    activate(context, tmpDir);
 
-    if (originalEnv) {
-      process.env.STITCH_API_KEY = originalEnv;
-    } else {
-      delete process.env.STITCH_API_KEY;
-    }
+    expect(infoSpy).toHaveBeenCalled();
+    expect(infoSpy.mock.calls[0]![0]).toMatch(/ADC/);
   });
 
   // TC-PR-07: Plugin manifest has required metadata
