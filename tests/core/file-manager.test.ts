@@ -272,10 +272,11 @@ describe('Plugin Registration', () => {
     expect(() => register(api)).not.toThrow();
     expect(api.registerTool).toHaveBeenCalledOnce();
 
-    // 1 tool registered: design_catalog
+    // 2 tools registered: design_catalog, design_vision
     expect(registeredTools.length).toBeGreaterThan(0);
-    expect(registeredTools[0]).toHaveLength(1);
+    expect(registeredTools[0]).toHaveLength(2);
     expect((registeredTools[0] as Array<{ name: string }>)[0]!.name).toBe('design_catalog');
+    expect((registeredTools[0] as Array<{ name: string }>)[1]!.name).toBe('design_vision');
   });
 
   // TC-PR-03: API key from OC config

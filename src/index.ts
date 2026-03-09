@@ -8,6 +8,8 @@
 import { activate } from './adapter.js';
 import type { DesignToolsContext } from './adapter.js';
 import { designCatalog, type DesignCatalogParams } from './tools/design-catalog.js';
+import { designVision, type DesignVisionParams } from './tools/design-vision.js';
+import { GeminiVisionClient } from './core/gemini-client.js';
 
 // Re-export core classes for direct usage
 export { StitchClient } from './core/stitch-client.js';
@@ -15,8 +17,11 @@ export { CatalogManager } from './core/catalog-manager.js';
 export { FileDownloadManager } from './core/file-manager.js';
 export { activate, getMissingApiKeyError } from './adapter.js';
 export { designCatalog } from './tools/design-catalog.js';
+export { designVision } from './tools/design-vision.js';
+export { GeminiVisionClient } from './core/gemini-client.js';
 export type { DesignToolsContext } from './adapter.js';
 export type { DesignCatalogParams } from './tools/design-catalog.js';
+export type { DesignVisionParams } from './tools/design-vision.js';
 
 // Re-export types
 export * from './core/types.js';
@@ -73,7 +78,23 @@ export default function register(api: OpenClawPluginApi): void {
       _designTools = activate(context, projectRoot);
     }
 
-    // Register design_catalog tool
+    // Initialize Gemini client (lazy — only when design_vision is called)
+    const geminiApiKey = context.config.get('gemini.apiKey') || process.env.GEMINI_API_KEY || null;
+    let geminiClient: GeminiVisionClient | null = null;
+
+    function getGeminiClient(): GeminiVisionClient {
+      if (!geminiClient) {
+        if (!geminiApiKey) {
+          throw new Error(
+            'Gemini API key not configured. Set gemini.apiKey in plugin config or GEMINI_API_KEY environment variable.',
+          );
+        }
+        geminiClient = new GeminiVisionClient({ apiKey: geminiApiKey });
+      }
+      return geminiClient;
+    }
+
+    // Register design_catalog + design_vision tools
     return [
       {
         name: 'design_catalog',
@@ -106,8 +127,46 @@ export default function register(api: OpenClawPluginApi): void {
           return designCatalog(params, projectRoot);
         },
       },
+      {
+        name: 'design_vision',
+        description: 'Visual analysis engine with 6 modes: vibe (aesthetic assessment), extract (design tokens), compare (vs reference), slop (AI slop detection), platform (native feel check), broken (rendering bug detection). Powered by Gemini Vision API.',
+        parameters: {
+          type: 'object',
+          properties: {
+            mode: {
+              type: 'string',
+              enum: ['vibe', 'extract', 'compare', 'slop', 'platform', 'broken'],
+              description: 'Analysis mode',
+            },
+            image: { type: 'string', description: 'Path to screenshot (required for most modes)' },
+            screenshot: { type: 'string', description: 'Alias for image (used in compare mode)' },
+            context: { type: 'string', description: 'Context about the design (vibe mode)' },
+            spec: { type: 'string', description: 'Design specification to evaluate against (vibe mode)' },
+            reference: { type: 'string', description: 'Path to reference image (compare mode)' },
+            screenId: { type: 'string', description: 'Catalog screen ID for auto-reference resolution (compare mode) or screen selection' },
+            versionA: { type: 'string', description: 'First version for comparison (compare mode, e.g. "v1")' },
+            versionB: { type: 'string', description: 'Second version for comparison (compare mode, e.g. "v2")' },
+            platform: {
+              type: 'string',
+              enum: ['ios', 'android', 'web', 'macos'],
+              description: 'Target platform (platform mode)',
+            },
+            batch: { type: 'boolean', description: 'Run mode against all approved catalog screens' },
+          },
+          required: ['mode'],
+        },
+        execute: async (params: DesignVisionParams) => {
+          try {
+            const client = getGeminiClient();
+            return await designVision(params, client, projectRoot);
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            return { success: false, error: message, code: 'GEMINI_INIT_ERROR' };
+          }
+        },
+      },
     ];
   });
 
-  api.logger.info('[design-tools] Plugin registered (1 tool: design_catalog)');
+  api.logger.info('[design-tools] Plugin registered (2 tools: design_catalog, design_vision)');
 }
