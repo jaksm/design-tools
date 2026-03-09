@@ -5,7 +5,9 @@
 // ── Stitch Client Types ─────────────────────────────────────────────────────
 
 export interface StitchClientConfig {
-  apiKey: string;
+  apiKey?: string;
+  accessToken?: string;
+  projectId?: string;
   baseUrl?: string;
   timeout?: number;
 }

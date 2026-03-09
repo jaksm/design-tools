@@ -18,18 +18,25 @@ import {
 } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://stitch.googleapis.com/mcp';
-const DEFAULT_TIMEOUT = 60_000; // 60 seconds
+const DEFAULT_TIMEOUT = 180_000; // 3 minutes for generation
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000; // 1 second
 
 export class StitchClient {
-  private readonly apiKey: string;
+  private readonly apiKey?: string;
+  private readonly accessToken?: string;
+  private readonly projectId?: string;
   private readonly baseUrl: string;
   private readonly timeout: number;
   private requestId = 0;
 
   constructor(config: StitchClientConfig) {
     this.apiKey = config.apiKey;
+    this.accessToken = config.accessToken;
+    this.projectId = config.projectId;
+    if (!this.apiKey && !this.accessToken) {
+      throw new StitchAuthError('Either apiKey or accessToken must be provided');
+    }
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     this.timeout = config.timeout ?? DEFAULT_TIMEOUT;
   }
@@ -37,11 +44,11 @@ export class StitchClient {
   /**
    * Call a JSON-RPC method on the Stitch API.
    */
-  async callTool(method: string, args: Record<string, unknown>): Promise<unknown> {
+  async callTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
     const body: JsonRpcRequest = {
       jsonrpc: '2.0',
-      method,
-      params: args,
+      method: 'tools/call',
+      params: { name: toolName, arguments: args },
       id: ++this.requestId,
     };
 
@@ -80,7 +87,11 @@ export class StitchClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Goog-Api-Key': this.apiKey,
+          'Accept': 'application/json, text/event-stream',
+          ...(this.accessToken
+            ? { 'Authorization': `Bearer ${this.accessToken}` }
+            : { 'X-Goog-Api-Key': this.apiKey! }),
+          ...(this.projectId ? { 'x-goog-user-project': this.projectId } : {}),
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -156,7 +167,40 @@ export class StitchClient {
       throw new StitchParseError('Invalid JSON-RPC response: missing both "result" and "error" fields');
     }
 
-    return data.result;
+    const result = data.result as Record<string, unknown>;
+
+    // MCP tools/call returns { content: [{ type: "text", text: "<json>" }], isError?: true }
+    // or { structuredContent: { ... } }
+    if (result && typeof result === 'object') {
+      // Check for error flag
+      if ('isError' in result && result.isError) {
+        const errText = Array.isArray(result.content)
+          ? (result.content as Array<{ text?: string }>).map(c => c.text).join(' ')
+          : 'Unknown Stitch error';
+        throw new StitchRpcError(errText, -1);
+      }
+
+      // Try structuredContent first (preferred)
+      if ('structuredContent' in result && result.structuredContent) {
+        return result.structuredContent;
+      }
+
+      // Try content array with text entries
+      if ('content' in result && Array.isArray(result.content)) {
+        for (const item of result.content) {
+          if (item && typeof item === 'object' && 'text' in item && typeof item.text === 'string') {
+            try {
+              return JSON.parse(item.text);
+            } catch {
+              return item.text;
+            }
+          }
+        }
+      }
+    }
+
+    // Fallback: return raw result
+    return result;
   }
 
   private sleep(ms: number): Promise<void> {

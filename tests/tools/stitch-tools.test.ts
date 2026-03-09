@@ -65,6 +65,28 @@ function makeStitchScreenResponse(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * Wraps a screen response in the StitchGenerationResponse envelope
+ * that generate_screen_from_text and edit_screens actually return.
+ */
+function makeStitchGenerationResponse(screenOverrides: Record<string, unknown> = {}) {
+  const screen = makeStitchScreenResponse(screenOverrides);
+  return {
+    outputComponents: [
+      {
+        design: {
+          screens: [screen],
+          theme: screen.theme,
+          title: screen.title,
+          deviceType: screen.deviceType,
+        },
+      },
+    ],
+    projectId: 'proj-123',
+    sessionId: 'session-abc',
+  };
+}
+
 function mockFetchForDownloads() {
   fetchSpy.mockImplementation(async (url: string | URL | Request) => {
     const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
@@ -190,7 +212,7 @@ afterEach(async () => {
 describe('design_generate', () => {
   // TC-GEN-01
   it('TC-GEN-01: successful generation with only required prompt', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     const result = await designGenerate({ prompt: 'A login screen with email and password fields' }, ctx);
 
@@ -217,15 +239,14 @@ describe('design_generate', () => {
 
   // TC-GEN-02
   it('TC-GEN-02: generation with all optional parameters', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({ title: 'Dashboard' }));
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({ title: 'Dashboard' }));
 
     const result = await designGenerate({
       prompt: 'Dashboard screen',
       projectId: 'proj-123',
       title: 'Main Dashboard',
       platform: 'web',
-      colorMode: 'dark',
-      customColor: '#0A0A0A',
+      modelId: 'GEMINI_3_PRO',
     }, ctx);
 
     expect(result.success).toBe(true);
@@ -235,8 +256,7 @@ describe('design_generate', () => {
       prompt: 'Dashboard screen',
       projectId: 'proj-123',
       deviceType: 'DESKTOP',
-      colorMode: 'dark',
-      customColor: '#0A0A0A',
+      modelId: 'GEMINI_3_PRO',
     }));
 
     // File paths use the explicit title's slug
@@ -246,7 +266,7 @@ describe('design_generate', () => {
 
   // TC-GEN-03
   it('TC-GEN-03: platform ios maps to MOBILE', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     await designGenerate({ prompt: 'Settings screen', platform: 'ios' }, ctx);
 
@@ -257,7 +277,7 @@ describe('design_generate', () => {
 
   // TC-GEN-04
   it('TC-GEN-04: platform android maps to MOBILE', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     await designGenerate({ prompt: 'Home screen', platform: 'android' }, ctx);
 
@@ -268,7 +288,7 @@ describe('design_generate', () => {
 
   // TC-GEN-05
   it('TC-GEN-05: platform web maps to DESKTOP', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     await designGenerate({ prompt: 'Landing page', platform: 'web' }, ctx);
 
@@ -279,7 +299,7 @@ describe('design_generate', () => {
 
   // TC-GEN-06
   it('TC-GEN-06: uses default projectId when not provided', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     const result = await designGenerate({ prompt: 'Splash screen' }, ctx);
 
@@ -324,7 +344,7 @@ describe('design_generate', () => {
 
   // TC-GEN-10
   it('TC-GEN-10: title auto-derived from Stitch response when not provided', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({ title: 'Login Screen' }));
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({ title: 'Login Screen' }));
 
     const result = await designGenerate({ prompt: 'A login screen' }, ctx);
 
@@ -335,7 +355,7 @@ describe('design_generate', () => {
 
   // TC-GEN-11
   it('TC-GEN-11: explicit title takes precedence over Stitch-returned title', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({ title: 'Something Stitch Named This' }));
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({ title: 'Something Stitch Named This' }));
 
     const result = await designGenerate({ prompt: '...', title: 'My Custom Title' }, ctx);
 
@@ -346,7 +366,7 @@ describe('design_generate', () => {
 
   // TC-GEN-12
   it('TC-GEN-12: special characters in title are safely slugified', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     const result = await designGenerate({ prompt: '...', title: "User's Profile & Settings!" }, ctx);
 
@@ -361,7 +381,7 @@ describe('design_generate', () => {
 
   // TC-GEN-13
   it('TC-GEN-13: HTML file saved with correct content', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
     const htmlContent = '<html><body>Login screen</body></html>';
     fetchSpy.mockImplementation(async (url: string | URL | Request) => {
       const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
@@ -381,7 +401,7 @@ describe('design_generate', () => {
 
   // TC-GEN-14
   it('TC-GEN-14: screenshot PNG saved to expected path', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     const result = await designGenerate({ prompt: 'Login', title: 'Login' }, ctx);
     expect(result.success).toBe(true);
@@ -394,7 +414,7 @@ describe('design_generate', () => {
 
   // TC-GEN-15
   it('TC-GEN-15: catalog entry created after successful generation', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     const result = await designGenerate({ prompt: 'Dashboard', title: 'Dashboard' }, ctx);
     expect(result.success).toBe(true);
@@ -409,7 +429,7 @@ describe('design_generate', () => {
 
   // TC-GEN-16
   it('TC-GEN-16: response includes all expected fields', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     const result = await designGenerate({ prompt: 'Splash screen', title: 'Splash' }, ctx) as any;
 
@@ -442,7 +462,7 @@ describe('design_generate', () => {
 
   // TC-GEN-18
   it('TC-GEN-18: download HTML failure → error with cleanup', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
     fetchSpy.mockImplementation(async (url: string | URL | Request) => {
       const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
       if (urlStr.includes('html')) {
@@ -463,7 +483,7 @@ describe('design_generate', () => {
 
   // TC-GEN-19
   it('TC-GEN-19: download screenshot failure → error with cleanup', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
     fetchSpy.mockImplementation(async (url: string | URL | Request) => {
       const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
       if (urlStr.includes('html')) {
@@ -501,7 +521,7 @@ describe('design_generate', () => {
     let callCount = 0;
     mockCallTool.mockImplementation(async () => {
       callCount++;
-      return makeStitchScreenResponse({ id: `screen-${callCount}`, title: 'Login' });
+      return makeStitchGenerationResponse({ id: `screen-${callCount}`, title: 'Login' });
     });
 
     const [r1, r2] = await Promise.all([
@@ -520,13 +540,13 @@ describe('design_generate', () => {
   });
 
   // TC-GEN-22
-  it('TC-GEN-22: colorMode forwarded to Stitch', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+  it('TC-GEN-22: modelId forwarded to Stitch', async () => {
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
-    await designGenerate({ prompt: '...', colorMode: 'dark' }, ctx);
+    await designGenerate({ prompt: '...', modelId: 'GEMINI_3_FLASH' }, ctx);
 
     expect(mockCallTool).toHaveBeenCalledWith('generate_screen_from_text', expect.objectContaining({
-      colorMode: 'dark',
+      modelId: 'GEMINI_3_FLASH',
     }));
   });
 
@@ -541,12 +561,13 @@ describe('design_generate', () => {
   });
 
   // TC-GEN-24
-  it('TC-GEN-24: invalid colorMode value returns error', async () => {
-    const result = await designGenerate({ prompt: '...', colorMode: 'midnight' }, ctx);
+  it('TC-GEN-24: modelId is optional and not sent when not provided', async () => {
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
-    expect(result.success).toBe(false);
-    expect((result as any).error).toContain('Invalid colorMode');
-    expect((result as any).error).toContain('midnight');
+    await designGenerate({ prompt: 'test' }, ctx);
+
+    const callArgs = mockCallTool.mock.calls[0]![1] as Record<string, unknown>;
+    expect(callArgs).not.toHaveProperty('modelId');
   });
 });
 
@@ -558,7 +579,7 @@ describe('design_edit', () => {
   // TC-EDIT-01
   it('TC-EDIT-01: successful edit with required params', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({
       htmlCode: { downloadUrl: 'https://cdn.example.com/html-v2.html' },
       screenshot: { downloadUrl: 'https://cdn.example.com/screenshot-v2.png' },
     }));
@@ -575,7 +596,7 @@ describe('design_edit', () => {
     // Verify Stitch was called correctly
     expect(mockCallTool).toHaveBeenCalledWith('edit_screens', expect.objectContaining({
       projectId: 'proj-123',
-      screenIds: ['screen-abc'],
+      selectedScreenIds: ['screen-abc'],
       prompt: 'Change the button color to blue',
     }));
   });
@@ -614,7 +635,7 @@ describe('design_edit', () => {
   // TC-EDIT-05
   it('TC-EDIT-05: explicit projectId overrides registry value', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-old');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     await designEdit({
       screenId: 'screen-abc',
@@ -630,7 +651,7 @@ describe('design_edit', () => {
   // TC-EDIT-06
   it('TC-EDIT-06: edit creates new version (v2) in catalog', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     const result = await designEdit({
       screenId: 'screen-abc',
@@ -649,7 +670,7 @@ describe('design_edit', () => {
   // TC-EDIT-07
   it('TC-EDIT-07: edit auto-versions with editPrompt as superseded reason', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     await designEdit({
       screenId: 'screen-abc',
@@ -665,7 +686,7 @@ describe('design_edit', () => {
   // TC-EDIT-08
   it('TC-EDIT-08: new version files saved at correct paths', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     const result = await designEdit({
       screenId: 'screen-abc',
@@ -705,7 +726,7 @@ describe('design_edit', () => {
   // TC-EDIT-10
   it('TC-EDIT-10: download failure during edit → catalog unchanged', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
     fetchSpy.mockImplementation(async () => {
       throw new Error('Network timeout');
     });
@@ -728,7 +749,7 @@ describe('design_edit', () => {
   // TC-EDIT-11
   it('TC-EDIT-11: edit_screens called with array of screenIds', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     await designEdit({
       screenId: 'screen-abc',
@@ -737,13 +758,13 @@ describe('design_edit', () => {
 
     const callArgs = mockCallTool.mock.calls[0]!;
     expect(callArgs[0]).toBe('edit_screens');
-    expect(callArgs[1].screenIds).toEqual(['screen-abc']);
+    expect(callArgs[1].selectedScreenIds).toEqual(['screen-abc']);
   });
 
   // TC-EDIT-12
   it('TC-EDIT-12: multiple consecutive edits build correct version chain', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     await designEdit({ screenId: 'screen-abc', editPrompt: 'First edit' }, ctx);
     await designEdit({ screenId: 'screen-abc', editPrompt: 'Second edit' }, ctx);
@@ -794,6 +815,7 @@ describe('design_get', () => {
     // Files already existed, so fetch should NOT have been called for downloads
     // (callTool was called for metadata though)
     expect(mockCallTool).toHaveBeenCalledWith('get_screen', expect.objectContaining({
+      name: 'projects/proj-123/screens/screen-abc',
       screenId: 'screen-abc',
     }));
   });
@@ -884,6 +906,7 @@ describe('design_get', () => {
     await designGet({ screenId: 'screen-abc', projectId: 'proj-override' }, ctx);
 
     expect(mockCallTool).toHaveBeenCalledWith('get_screen', expect.objectContaining({
+      name: 'projects/proj-override/screens/screen-abc',
       projectId: 'proj-override',
     }));
   });
@@ -917,8 +940,8 @@ describe('design_projects', () => {
   // TC-PROJ-01
   it('TC-PROJ-01: returns array of projects with required fields', async () => {
     mockCallTool.mockResolvedValue([
-      { id: 'proj-1', name: 'LinguaAI', screenCount: 5 },
-      { id: 'proj-2', name: 'RepairBot', screenCount: 2 },
+      { name: 'projects/proj-1', title: 'LinguaAI', screenCount: 5 },
+      { name: 'projects/proj-2', title: 'RepairBot', screenCount: 2 },
     ]);
 
     const result = await designProjects({}, ctx) as any;
@@ -926,6 +949,7 @@ describe('design_projects', () => {
     expect(result.success).toBe(true);
     expect(result.projects).toHaveLength(2);
     expect(result.count).toBe(2);
+    // id should be extracted from name field (strip "projects/" prefix)
     expect(result.projects[0]).toEqual({ id: 'proj-1', name: 'LinguaAI', screenCount: 5 });
     expect(result.projects[1]).toEqual({ id: 'proj-2', name: 'RepairBot', screenCount: 2 });
   });
@@ -1121,7 +1145,7 @@ describe('design_screens', () => {
 
   // TC-SCR-07
   it('TC-SCR-07: design_screens reflects screens added by design_generate', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({ id: 'scr-new', title: 'Login' }));
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({ id: 'scr-new', title: 'Login' }));
 
     const genResult = await designGenerate({ prompt: 'Login screen', title: 'Login' }, ctx);
     expect(genResult.success).toBe(true);
@@ -1137,7 +1161,7 @@ describe('design_screens', () => {
   // TC-SCR-08
   it('TC-SCR-08: design_screens reflects updates from design_edit', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     await designEdit({ screenId: 'screen-abc', editPrompt: 'edit' }, ctx);
 
@@ -1242,7 +1266,7 @@ describe('design_create_project', () => {
 describe('integration', () => {
   // TC-INTEG-01
   it('TC-INTEG-01: generate → verify artifact in catalog with correct metadata', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({ id: 'scr-splash' }));
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({ id: 'scr-splash' }));
 
     const result = await designGenerate({
       prompt: 'Splash screen',
@@ -1268,7 +1292,7 @@ describe('integration', () => {
 
   // TC-INTEG-02
   it('TC-INTEG-02: generate → edit → verify catalog auto-versioned', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({ id: 'scr-login' }));
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({ id: 'scr-login' }));
 
     const genResult = await designGenerate({
       prompt: 'Login form',
@@ -1279,7 +1303,7 @@ describe('integration', () => {
     const screenId = (genResult as any).screenId;
 
     // Edit
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({
       id: 'scr-login',
       htmlCode: { downloadUrl: 'https://cdn.example.com/html-v2.html' },
       screenshot: { downloadUrl: 'https://cdn.example.com/ss-v2.png' },
@@ -1307,7 +1331,7 @@ describe('integration', () => {
 
   // TC-INTEG-04
   it('TC-INTEG-04: generate → list screens → screen appears with correct file paths', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({ id: 'scr-dash' }));
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({ id: 'scr-dash' }));
 
     const genResult = await designGenerate({
       prompt: 'Dashboard',
@@ -1334,7 +1358,7 @@ describe('integration', () => {
     let callCount = 0;
     mockCallTool.mockImplementation(async () => {
       callCount++;
-      return makeStitchScreenResponse({ id: `scr-${callCount}` });
+      return makeStitchGenerationResponse({ id: `scr-${callCount}` });
     });
 
     await designGenerate({ prompt: 'A', title: 'Screen A' }, ctx);
@@ -1369,7 +1393,7 @@ describe('integration', () => {
   // TC-INTEG-07
   it('TC-INTEG-07: edit with download failure → catalog stays at previous version', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
     // HTML downloads fine but screenshot fails
     fetchSpy.mockImplementation(async (url: string | URL | Request) => {
       const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
@@ -1394,7 +1418,10 @@ describe('integration', () => {
 
   // TC-INTEG-08
   it('TC-INTEG-08: generate → get → file paths match', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({ id: 'scr-onboarding' }));
+    mockCallTool.mockImplementation(async (toolName: string) => {
+      if (toolName === 'generate_screen_from_text') return makeStitchGenerationResponse({ id: 'scr-onboarding' });
+      return makeStitchScreenResponse({ id: 'scr-onboarding' }); // get_screen
+    });
 
     const genResult = await designGenerate({
       prompt: 'Onboarding step 1',
@@ -1411,7 +1438,7 @@ describe('integration', () => {
   // TC-INTEG-09
   it('TC-INTEG-09: design_screens after edit reflects updated version', async () => {
     await seedCatalogWithScreen('profile', 'screen-prof', 'proj-1');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     await designEdit({ screenId: 'screen-prof', editPrompt: 'update' }, ctx);
 
@@ -1451,7 +1478,7 @@ describe('cross-cutting', () => {
 
   // TC-CROSS-02
   it('TC-CROSS-02: all success responses have success: true', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     // design_screens doesn't need Stitch
     const screensResult = await designScreens({}, ctx);
@@ -1468,7 +1495,7 @@ describe('cross-cutting', () => {
     expect(createResult.success).toBe(true);
 
     // design_generate
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
     const genResult = await designGenerate({ prompt: 'test', title: 'TestGen' }, ctx);
     expect(genResult.success).toBe(true);
   });
@@ -1498,7 +1525,7 @@ describe('cross-cutting', () => {
 
   // TC-CROSS-04
   it('TC-CROSS-04: local screen registry is updated after design_generate', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({ id: 'scr-contact' }));
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({ id: 'scr-contact' }));
 
     await designGenerate({ prompt: 'Contact page', title: 'Contact' }, ctx);
 
@@ -1511,7 +1538,7 @@ describe('cross-cutting', () => {
   // TC-CROSS-05
   it('TC-CROSS-05: local screen registry is updated after design_edit', async () => {
     await seedCatalogWithScreen('contact', 'scr-contact', 'proj-1');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     await designEdit({ screenId: 'scr-contact', editPrompt: 'update' }, ctx);
 
@@ -1523,7 +1550,7 @@ describe('cross-cutting', () => {
 
   // TC-CROSS-06
   it('TC-CROSS-06: file paths use safe naming (no special characters)', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     const result = await designGenerate({
       prompt: 'test',
@@ -1543,7 +1570,7 @@ describe('cross-cutting', () => {
 
   // TC-CROSS-07
   it('TC-CROSS-07: file paths are always relative to projectRoot', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
 
     const result = await designGenerate({ prompt: 'test', title: 'TestRel' }, ctx) as any;
     expect(result.success).toBe(true);
@@ -1592,7 +1619,7 @@ describe('cross-cutting', () => {
     let callCount = 0;
     mockCallTool.mockImplementation(async () => {
       callCount++;
-      return makeStitchScreenResponse({ id: `scr-${callCount}`, title: `Screen ${callCount}` });
+      return makeStitchGenerationResponse({ id: `scr-${callCount}`, title: `Screen ${callCount}` });
     });
 
     await Promise.all([
@@ -1613,7 +1640,10 @@ describe('cross-cutting', () => {
   // TC-CROSS-13
   it('TC-CROSS-13: Stitch tools look up projectId from registry when not provided', async () => {
     await seedCatalogWithScreen('login', 'screen-abc', 'proj-from-registry');
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+    mockCallTool.mockImplementation(async (toolName: string) => {
+      if (toolName === 'edit_screens') return makeStitchGenerationResponse();
+      return makeStitchScreenResponse(); // get_screen returns direct screen
+    });
 
     // design_edit without projectId
     await designEdit({ screenId: 'screen-abc', editPrompt: 'test' }, ctx);
@@ -1630,7 +1660,7 @@ describe('cross-cutting', () => {
 
   // TC-CROSS-14
   it('TC-CROSS-14: screen slug is consistent across generate, edit, get, and screens list', async () => {
-    mockCallTool.mockResolvedValue(makeStitchScreenResponse({ id: 'scr-myapp' }));
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse({ id: 'scr-myapp' }));
 
     const genResult = await designGenerate({ prompt: 'test', title: 'My App Screen' }, ctx) as any;
     expect(genResult.success).toBe(true);
@@ -1641,5 +1671,168 @@ describe('cross-cutting', () => {
     const screensResult = await designScreens({}, ctx) as any;
     const found = screensResult.screens.find((s: any) => s.screen === slug);
     expect(found).toBeDefined();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 10. Response Parsing Tests (StitchGenerationResponse extraction)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('response parsing', () => {
+  it('extracts screen from outputComponents[0].design.screens[0] on generate', async () => {
+    const generationResponse = {
+      outputComponents: [
+        {
+          design: {
+            screens: [makeStitchScreenResponse({ id: 'parsed-screen', title: 'Parsed' })],
+            theme: { colorMode: 'LIGHT' },
+            title: 'Test Design',
+            deviceType: 'MOBILE',
+          },
+          suggestion: 'Here is your screen',
+        },
+      ],
+      projectId: 'proj-123',
+      sessionId: 'session-xyz',
+    };
+    mockCallTool.mockResolvedValue(generationResponse);
+
+    const result = await designGenerate({ prompt: 'test', title: 'Parsed' }, ctx) as any;
+
+    expect(result.success).toBe(true);
+    expect(result.screenId).toBe('parsed-screen');
+  });
+
+  it('extracts screen from outputComponents[0].design.screens[0] on edit', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    const generationResponse = {
+      outputComponents: [
+        {
+          design: {
+            screens: [makeStitchScreenResponse({ id: 'screen-abc', title: 'Updated Login' })],
+            theme: { colorMode: 'DARK' },
+          },
+        },
+      ],
+      projectId: 'proj-123',
+      sessionId: 'session-xyz',
+    };
+    mockCallTool.mockResolvedValue(generationResponse);
+
+    const result = await designEdit({
+      screenId: 'screen-abc',
+      editPrompt: 'Make it dark',
+    }, ctx) as any;
+
+    expect(result.success).toBe(true);
+    expect(result.version).toBe(2);
+  });
+
+  it('returns error when outputComponents is empty on generate', async () => {
+    mockCallTool.mockResolvedValue({
+      outputComponents: [],
+      projectId: 'proj-123',
+      sessionId: 'session-xyz',
+    });
+
+    const result = await designGenerate({ prompt: 'test' }, ctx) as any;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('empty outputComponents');
+    expect(result.code).toBe('STITCH_EMPTY_RESPONSE');
+  });
+
+  it('returns error when design.screens is empty on generate', async () => {
+    mockCallTool.mockResolvedValue({
+      outputComponents: [{ design: { screens: [] } }],
+      projectId: 'proj-123',
+      sessionId: 'session-xyz',
+    });
+
+    const result = await designGenerate({ prompt: 'test' }, ctx) as any;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('empty outputComponents');
+  });
+
+  it('returns error when design is missing on edit', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue({
+      outputComponents: [{ suggestion: 'No design generated' }],
+      projectId: 'proj-123',
+      sessionId: 'session-xyz',
+    });
+
+    const result = await designEdit({
+      screenId: 'screen-abc',
+      editPrompt: 'test',
+    }, ctx) as any;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('empty outputComponents');
+  });
+
+  it('handles multiple screens in outputComponents and picks the first', async () => {
+    mockCallTool.mockResolvedValue({
+      outputComponents: [
+        {
+          design: {
+            screens: [
+              makeStitchScreenResponse({ id: 'first-screen', title: 'First' }),
+              makeStitchScreenResponse({ id: 'second-screen', title: 'Second' }),
+            ],
+          },
+        },
+      ],
+      projectId: 'proj-123',
+      sessionId: 'session-xyz',
+    });
+
+    const result = await designGenerate({ prompt: 'test', title: 'Multi' }, ctx) as any;
+
+    expect(result.success).toBe(true);
+    expect(result.screenId).toBe('first-screen');
+  });
+
+  it('project ID extraction from name field (projects/{id} format)', async () => {
+    mockCallTool.mockResolvedValue([
+      { name: 'projects/abc-123-def', title: 'My Project' },
+      { name: 'projects/xyz-789', title: 'Other Project' },
+      { id: 'fallback-id', title: 'No Name Field' },
+    ]);
+
+    const result = await designProjects({}, ctx) as any;
+
+    expect(result.success).toBe(true);
+    expect(result.projects[0].id).toBe('abc-123-def');
+    expect(result.projects[1].id).toBe('xyz-789');
+    expect(result.projects[2].id).toBe('fallback-id');
+  });
+
+  it('get_screen includes name parameter in API call', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchScreenResponse());
+
+    await designGet({ screenId: 'screen-abc' }, ctx);
+
+    expect(mockCallTool).toHaveBeenCalledWith('get_screen', {
+      name: 'projects/proj-123/screens/screen-abc',
+      projectId: 'proj-123',
+      screenId: 'screen-abc',
+    });
+  });
+
+  it('edit_screens uses selectedScreenIds param name', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchGenerationResponse());
+
+    await designEdit({
+      screenId: 'screen-abc',
+      editPrompt: 'test',
+    }, ctx);
+
+    const callArgs = mockCallTool.mock.calls[0]![1] as Record<string, unknown>;
+    expect(callArgs).toHaveProperty('selectedScreenIds', ['screen-abc']);
+    expect(callArgs).not.toHaveProperty('screenIds');
   });
 });

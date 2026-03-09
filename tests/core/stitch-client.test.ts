@@ -107,8 +107,8 @@ describe('StitchClient', () => {
 
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.jsonrpc).toBe('2.0');
-    expect(body.method).toBe('someMethod');
-    expect(body.params).toEqual({ param1: 'value' });
+    expect(body.method).toBe('tools/call');
+    expect(body.params).toEqual({ name: 'someMethod', arguments: { param1: 'value' } });
     expect(body.id).toBeDefined();
     expect(body.id).not.toBeNull();
   });

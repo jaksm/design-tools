@@ -120,6 +120,21 @@ interface StitchScreenResponse {
   };
 }
 
+interface StitchGenerationResponse {
+  outputComponents: Array<{
+    design?: {
+      screens?: StitchScreenResponse[];
+      theme?: Record<string, unknown>;
+      title?: string;
+      deviceType?: string;
+    };
+    suggestion?: string;
+    text?: string;
+  }>;
+  projectId: string;
+  sessionId: string;
+}
+
 interface StitchProjectResponse {
   id?: string;
   name?: string;
@@ -134,8 +149,7 @@ export interface DesignGenerateParams {
   projectId?: string;
   title?: string;
   platform?: string;
-  colorMode?: string;
-  customColor?: string;
+  modelId?: string;
   [key: string]: unknown;
 }
 
@@ -143,6 +157,7 @@ export interface DesignEditParams {
   screenId?: string;
   editPrompt?: string;
   projectId?: string;
+  modelId?: string;
   [key: string]: unknown;
 }
 
@@ -356,16 +371,6 @@ export async function designGenerate(
       }
     }
 
-    // Validate colorMode
-    if (params.colorMode !== undefined) {
-      if (!VALID_COLOR_MODES.includes(params.colorMode as typeof VALID_COLOR_MODES[number])) {
-        return err(
-          `Invalid colorMode: \`${params.colorMode}\`. Valid values: \`light\`, \`dark\``,
-          'INVALID_PARAM',
-        );
-      }
-    }
-
     // Build Stitch args
     const stitchArgs: Record<string, unknown> = {
       projectId,
@@ -376,18 +381,19 @@ export async function designGenerate(
       stitchArgs.deviceType = PLATFORM_TO_DEVICE_TYPE[params.platform as Platform];
     }
 
-    if (params.colorMode) {
-      stitchArgs.colorMode = params.colorMode;
-    }
-
-    if (params.customColor) {
-      stitchArgs.customColor = params.customColor;
+    if (params.modelId) {
+      stitchArgs.modelId = params.modelId;
     }
 
     // Call Stitch
     let screen: StitchScreenResponse;
     try {
-      screen = await ctx.stitchClient.callTool('generate_screen_from_text', stitchArgs) as StitchScreenResponse;
+      const response = await ctx.stitchClient.callTool('generate_screen_from_text', stitchArgs) as StitchGenerationResponse;
+      const extracted = response.outputComponents?.[0]?.design?.screens?.[0];
+      if (!extracted) {
+        return err('No screen generated — Stitch returned empty outputComponents', 'STITCH_EMPTY_RESPONSE');
+      }
+      screen = extracted;
     } catch (error) {
       return formatStitchError(error);
     }
@@ -534,11 +540,20 @@ export async function designEdit(
     // Call Stitch
     let screen: StitchScreenResponse;
     try {
-      screen = await ctx.stitchClient.callTool('edit_screens', {
+      const editArgs: Record<string, unknown> = {
         projectId,
-        screenIds: [params.screenId],
+        selectedScreenIds: [params.screenId],
         prompt: params.editPrompt,
-      }) as StitchScreenResponse;
+      };
+      if (params.modelId) {
+        editArgs.modelId = params.modelId;
+      }
+      const response = await ctx.stitchClient.callTool('edit_screens', editArgs) as StitchGenerationResponse;
+      const extracted = response.outputComponents?.[0]?.design?.screens?.[0];
+      if (!extracted) {
+        return err('No screen returned from edit — Stitch returned empty outputComponents', 'STITCH_EMPTY_RESPONSE');
+      }
+      screen = extracted;
     } catch (error) {
       return formatStitchError(error);
     }
@@ -699,6 +714,7 @@ export async function designGet(
     let screen: StitchScreenResponse;
     try {
       screen = await ctx.stitchClient.callTool('get_screen', {
+        name: `projects/${projectId}/screens/${params.screenId}`,
         projectId,
         screenId: params.screenId,
       }) as StitchScreenResponse;
@@ -801,8 +817,8 @@ export async function designProjects(
     }
 
     const normalized = projects.map((p) => ({
-      id: p.id ?? '',
-      name: p.name ?? p.title ?? '',
+      id: p.name?.split('projects/')[1] || p.id || '',
+      name: p.title ?? p.name ?? '',
       ...(p.screenCount !== undefined ? { screenCount: p.screenCount } : {}),
     }));
 
