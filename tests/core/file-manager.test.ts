@@ -272,10 +272,10 @@ describe('Plugin Registration', () => {
     expect(() => register(api)).not.toThrow();
     expect(api.registerTool).toHaveBeenCalledOnce();
 
-    // Currently 0 tools — infrastructure only
-    if (registeredTools.length > 0) {
-      expect(registeredTools[0]).toHaveLength(0);
-    }
+    // 1 tool registered: design_catalog
+    expect(registeredTools.length).toBeGreaterThan(0);
+    expect(registeredTools[0]).toHaveLength(1);
+    expect((registeredTools[0] as Array<{ name: string }>)[0]!.name).toBe('design_catalog');
   });
 
   // TC-PR-03: API key from OC config

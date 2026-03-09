@@ -7,13 +7,16 @@
 
 import { activate } from './adapter.js';
 import type { DesignToolsContext } from './adapter.js';
+import { designCatalog, type DesignCatalogParams } from './tools/design-catalog.js';
 
 // Re-export core classes for direct usage
 export { StitchClient } from './core/stitch-client.js';
 export { CatalogManager } from './core/catalog-manager.js';
 export { FileDownloadManager } from './core/file-manager.js';
 export { activate, getMissingApiKeyError } from './adapter.js';
+export { designCatalog } from './tools/design-catalog.js';
 export type { DesignToolsContext } from './adapter.js';
+export type { DesignCatalogParams } from './tools/design-catalog.js';
 
 // Re-export types
 export * from './core/types.js';
@@ -70,9 +73,41 @@ export default function register(api: OpenClawPluginApi): void {
       _designTools = activate(context, projectRoot);
     }
 
-    // No tools registered yet — infrastructure only
-    return [];
+    // Register design_catalog tool
+    return [
+      {
+        name: 'design_catalog',
+        description: 'Manage design artifacts per project. Actions: list, add, version, status, link, show, remove.',
+        parameters: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['list', 'add', 'version', 'status', 'link', 'show', 'remove'],
+              description: 'Action to perform',
+            },
+            screen: { type: 'string', description: 'Artifact screen name' },
+            description: { type: 'string', description: 'Artifact description (add)' },
+            html: { type: 'string', description: 'Path to HTML file (add, version)' },
+            screenshot: { type: 'string', description: 'Path to screenshot file (add, version)' },
+            status: { type: 'string', description: 'Target status (status action) or filter (list)' },
+            reason: { type: 'string', description: 'Supersede reason (version)' },
+            approvedBy: { type: 'string', description: 'Approver name (status → approved)' },
+            notes: { type: 'string', description: 'Approval/rejection notes (status)' },
+            mcTaskId: { type: ['string', 'null'], description: 'MC task ID (link)' },
+            mcObjectiveId: { type: ['string', 'null'], description: 'MC objective ID (link)' },
+            stitchProjectId: { type: 'string', description: 'Stitch project ID (add)' },
+            stitchScreenId: { type: 'string', description: 'Stitch screen ID (add)' },
+            deleteFiles: { type: 'boolean', description: 'Delete associated files on remove (default: false)' },
+          },
+          required: ['action'],
+        },
+        execute: async (params: DesignCatalogParams) => {
+          return designCatalog(params, projectRoot);
+        },
+      },
+    ];
   });
 
-  api.logger.info('[design-tools] Plugin registered (infrastructure only, 0 tools)');
+  api.logger.info('[design-tools] Plugin registered (1 tool: design_catalog)');
 }
