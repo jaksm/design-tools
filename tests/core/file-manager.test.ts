@@ -272,11 +272,17 @@ describe('Plugin Registration', () => {
     expect(() => register(api)).not.toThrow();
     expect(api.registerTool).toHaveBeenCalledOnce();
 
-    // 2 tools registered: design_catalog, design_vision
+    // 8 tools registered: design_catalog, design_vision, + 6 stitch native tools
     expect(registeredTools.length).toBeGreaterThan(0);
-    expect(registeredTools[0]).toHaveLength(2);
+    expect(registeredTools[0]).toHaveLength(8);
     expect((registeredTools[0] as Array<{ name: string }>)[0]!.name).toBe('design_catalog');
     expect((registeredTools[0] as Array<{ name: string }>)[1]!.name).toBe('design_vision');
+    expect((registeredTools[0] as Array<{ name: string }>)[2]!.name).toBe('design_generate');
+    expect((registeredTools[0] as Array<{ name: string }>)[3]!.name).toBe('design_edit');
+    expect((registeredTools[0] as Array<{ name: string }>)[4]!.name).toBe('design_get');
+    expect((registeredTools[0] as Array<{ name: string }>)[5]!.name).toBe('design_projects');
+    expect((registeredTools[0] as Array<{ name: string }>)[6]!.name).toBe('design_screens');
+    expect((registeredTools[0] as Array<{ name: string }>)[7]!.name).toBe('design_create_project');
   });
 
   // TC-PR-03: API key from OC config
