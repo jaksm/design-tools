@@ -1,0 +1,25 @@
+{
+  "name": "openclaw-design-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Design tooling for AI agents — Design Catalog, Design Vision, and Stitch Native Tools.",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
+  }
+}
