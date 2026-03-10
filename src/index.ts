@@ -150,7 +150,12 @@ export default function register(api: OpenClawPluginApi): void {
     return [
       {
         name: 'design_catalog',
-        description: 'Manage design artifacts per project. Actions: list, add, version, status, link, show, remove.',
+        description: [
+          "Manage the design catalog — the registry of all design artifacts (screens) in the project.",
+          "Use this to track design lifecycle: add screens to the catalog, update their status (draft → review → approved/rejected), create new versions, and link artifacts to MC tasks for traceability.",
+          "Actions: 'list' (view all artifacts, optionally filter by status), 'add' (register a new screen), 'version' (create a new version of an existing screen), 'status' (approve/reject), 'link' (connect to MC task/objective), 'show' (view details), 'remove' (delete from catalog).",
+          "The catalog is the source of truth for which designs exist and their approval state. Always check it before generating new screens.",
+        ].join("\n"),
         parameters: {
           type: 'object',
           properties: {
@@ -181,7 +186,13 @@ export default function register(api: OpenClawPluginApi): void {
       },
       {
         name: 'design_vision',
-        description: 'Visual analysis engine with 6 modes: vibe (aesthetic assessment), extract (design tokens), compare (vs reference), slop (AI slop detection), platform (native feel check), broken (rendering bug detection). Powered by Gemini Vision API.',
+        description: [
+          "Analyze design screenshots using Gemini Vision. Six modes for different analysis needs.",
+          "Modes: 'vibe' (aesthetic assessment with DIAGNOSE → PRESCRIBE fixes), 'extract' (pull reusable design tokens — colors, spacing, typography), 'compare' (rate visual match against a reference image), 'slop' (detect AI-generated generic feel), 'platform' (check native feel for ios/android/web/macos), 'broken' (find rendering bugs — overlaps, clipping, layout breakage).",
+          "Use 'vibe' for overall design quality review, 'compare' to verify implementation matches spec, 'broken' before shipping to catch visual regressions.",
+          "Pass a screenshot path via 'image' param. For 'compare' mode, also provide a 'reference' image or use 'screenId' for auto-reference from catalog.",
+          "Set 'batch: true' to run a mode against all approved catalog screens at once.",
+        ].join("\n"),
         parameters: {
           type: 'object',
           properties: {
@@ -220,7 +231,13 @@ export default function register(api: OpenClawPluginApi): void {
       // ── Stitch Native Tools ─────────────────────────────────────────────
       {
         name: 'design_generate',
-        description: 'Generate a new screen from text via Stitch API. Auto-downloads HTML + screenshot and registers in catalog.',
+        description: [
+          "Generate a new design screen from a text prompt via the Stitch API.",
+          "This is the ONLY way to create new screens. The tool handles the full pipeline: Stitch API call → HTML download → screenshot download → catalog registration → screen registry entry.",
+          "Use this when starting a new screen from scratch. For iterating on an existing screen, use design_edit instead.",
+          "NEVER write HTML/CSS manually — always use this tool to create screens via the Stitch API.",
+          "Do not use file_write to create design artifacts. Results are automatically downloaded, catalogued, and registered.",
+        ].join("\n"),
         parameters: {
           type: 'object',
           properties: {
@@ -238,7 +255,12 @@ export default function register(api: OpenClawPluginApi): void {
       },
       {
         name: 'design_variants',
-        description: 'Generate multiple visual variations of an existing screen via Stitch API. Each variant gets its own catalog entry and screen registry entry. Useful for design exploration.',
+        description: [
+          "Generate multiple visual variations of an existing screen via the Stitch API for design exploration.",
+          "Use this for exploring different design directions — NOT for iterating on a specific screen. Each variant gets its own catalog entry and screen registry entry.",
+          "Control variation with 'creativeRange' (conservative/moderate/adventurous) and 'aspects' (e.g. color, layout, typography).",
+          "For refining a single screen toward a specific direction, use design_edit instead. Variants are for exploring, edits are for converging.",
+        ].join("\n"),
         parameters: {
           type: 'object',
           properties: {
@@ -257,7 +279,13 @@ export default function register(api: OpenClawPluginApi): void {
       },
       {
         name: 'design_edit',
-        description: 'Edit an existing Stitch screen. Auto-downloads updated HTML + screenshot and versions in catalog.',
+        description: [
+          "Edit an existing Stitch screen by providing edit instructions in natural language.",
+          "Use this to iterate on existing screens, not regenerate from scratch. It preserves Stitch context from the previous version, maintaining design continuity.",
+          "Pass the screenId from a previous design_generate or design_edit call. The tool auto-versions in the catalog (v1 → v2 → v3) and downloads updated HTML + screenshot.",
+          "NEVER regenerate a screen from scratch when editing — use this tool to iterate. It preserves Stitch context and produces better results than starting over.",
+          "NEVER write HTML/CSS manually. Do not use file_write to create design artifacts. Results are automatically downloaded, catalogued, and registered.",
+        ].join("\n"),
         parameters: {
           type: 'object',
           properties: {
@@ -274,7 +302,12 @@ export default function register(api: OpenClawPluginApi): void {
       },
       {
         name: 'design_get',
-        description: 'Get screen details + content from Stitch. Downloads HTML + screenshot if not cached locally.',
+        description: [
+          "Fetch a screen's details and content from the Stitch API.",
+          "Use this to download a screen you don't have locally yet, or to verify a screen exists and inspect its current state.",
+          "Automatically downloads and caches HTML + screenshot files locally if not already present. Subsequent calls use the cached version.",
+          "Pass a screenId (required) and optionally a projectId (auto-looked up from registry if omitted).",
+        ].join("\n"),
         parameters: {
           type: 'object',
           properties: {
@@ -289,7 +322,11 @@ export default function register(api: OpenClawPluginApi): void {
       },
       {
         name: 'design_projects',
-        description: 'List all accessible Stitch projects.',
+        description: [
+          "List all Stitch projects accessible to the current user.",
+          "Use this to find project IDs for use with other design tools (design_generate, design_edit, etc.).",
+          "Returns project metadata including title, description, and ID.",
+        ].join("\n"),
         parameters: {
           type: 'object',
           properties: {},
@@ -300,7 +337,12 @@ export default function register(api: OpenClawPluginApi): void {
       },
       {
         name: 'design_screens',
-        description: 'List screens from local registry (workaround for broken Stitch list_screens). Never calls Stitch API.',
+        description: [
+          "List screens from the local screen registry. Does NOT call the Stitch API.",
+          "Use this to see what screens have been generated or downloaded in the current workspace.",
+          "Optionally filter by projectId. Returns screen metadata from the local registry only — if a screen exists on Stitch but hasn't been fetched, it won't appear here.",
+          "To fetch a screen from Stitch into the local registry, use design_get.",
+        ].join("\n"),
         parameters: {
           type: 'object',
           properties: {
@@ -313,7 +355,11 @@ export default function register(api: OpenClawPluginApi): void {
       },
       {
         name: 'design_create_project',
-        description: 'Create a new Stitch project.',
+        description: [
+          "Create a new Stitch project for organizing design screens.",
+          "Use this when starting design work for a new product or feature that doesn't fit into an existing project.",
+          "Check design_projects first to avoid creating duplicates. Each project acts as a container for related screens.",
+        ].join("\n"),
         parameters: {
           type: 'object',
           properties: {
