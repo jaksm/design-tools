@@ -175,7 +175,7 @@ export default function register(api: OpenClawPluginApi): void {
           },
           required: ['action'],
         },
-        execute: async (params: DesignCatalogParams) => {
+        execute: async (_toolCallId: string, params: DesignCatalogParams) => {
           return designCatalog(params, projectRoot);
         },
       },
@@ -207,7 +207,7 @@ export default function register(api: OpenClawPluginApi): void {
           },
           required: ['mode'],
         },
-        execute: async (params: DesignVisionParams) => {
+        execute: async (_toolCallId: string, params: DesignVisionParams) => {
           try {
             const client = getGeminiClient();
             return await designVision(params, client, projectRoot);
@@ -232,7 +232,7 @@ export default function register(api: OpenClawPluginApi): void {
           },
           required: ['prompt'],
         },
-        execute: async (params: DesignGenerateParams) => {
+        execute: async (_toolCallId: string, params: DesignGenerateParams) => {
           return designGenerate(params, stitchCtx);
         },
       },
@@ -251,7 +251,7 @@ export default function register(api: OpenClawPluginApi): void {
           },
           required: ['screenId'],
         },
-        execute: async (params: DesignVariantsParams) => {
+        execute: async (_toolCallId: string, params: DesignVariantsParams) => {
           return designVariants(params, stitchCtx);
         },
       },
@@ -268,7 +268,7 @@ export default function register(api: OpenClawPluginApi): void {
           },
           required: ['screenId', 'editPrompt'],
         },
-        execute: async (params: DesignEditParams) => {
+        execute: async (_toolCallId: string, params: DesignEditParams) => {
           return designEdit(params, stitchCtx);
         },
       },
@@ -283,7 +283,7 @@ export default function register(api: OpenClawPluginApi): void {
           },
           required: ['screenId'],
         },
-        execute: async (params: DesignGetParams) => {
+        execute: async (_toolCallId: string, params: DesignGetParams) => {
           return designGet(params, stitchCtx);
         },
       },
@@ -294,7 +294,7 @@ export default function register(api: OpenClawPluginApi): void {
           type: 'object',
           properties: {},
         },
-        execute: async (params: DesignProjectsParams) => {
+        execute: async (_toolCallId: string, params: DesignProjectsParams) => {
           return designProjects(params, stitchCtx);
         },
       },
@@ -307,7 +307,7 @@ export default function register(api: OpenClawPluginApi): void {
             projectId: { type: 'string', description: 'Filter by Stitch project ID' },
           },
         },
-        execute: async (params: DesignScreensParams) => {
+        execute: async (_toolCallId: string, params: DesignScreensParams) => {
           return designScreens(params, stitchCtx);
         },
       },
@@ -322,7 +322,7 @@ export default function register(api: OpenClawPluginApi): void {
           },
           required: ['title'],
         },
-        execute: async (params: DesignCreateProjectParams) => {
+        execute: async (_toolCallId: string, params: DesignCreateProjectParams) => {
           return designCreateProject(params, stitchCtx);
         },
       },

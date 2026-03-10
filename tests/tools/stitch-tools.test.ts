@@ -649,7 +649,8 @@ describe('design_variants', () => {
     // Verify Stitch was called correctly
     expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
       projectId: 'proj-123',
-      screenId: 'screen-abc',
+      selectedScreenIds: ['screen-abc'],
+      prompt: expect.any(String),
       variantOptions: { variantCount: 2 },
     }));
   });
@@ -717,7 +718,7 @@ describe('design_variants', () => {
     await designVariants({ screenId: 'screen-abc', creativeRange: 'adventurous' }, ctx);
 
     expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
-      variantOptions: expect.objectContaining({ creativeRange: 'adventurous' }),
+      variantOptions: expect.objectContaining({ creativeRange: 'REIMAGINE' }),
     }));
   });
 
@@ -741,7 +742,7 @@ describe('design_variants', () => {
     await designVariants({ screenId: 'screen-abc', aspects: ['color', 'layout'] }, ctx);
 
     expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
-      variantOptions: expect.objectContaining({ aspects: ['color', 'layout'] }),
+      variantOptions: expect.objectContaining({ aspects: ['COLOR_SCHEME', 'LAYOUT'] }),
     }));
   });
 
@@ -971,10 +972,12 @@ describe('design_variants', () => {
     }, ctx);
 
     expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
+      selectedScreenIds: ['screen-abc'],
+      prompt: expect.any(String),
       variantOptions: {
         variantCount: 3,
-        creativeRange: 'moderate',
-        aspects: ['color', 'typography', 'layout'],
+        creativeRange: 'EXPLORE',
+        aspects: ['COLOR_SCHEME', 'TEXT_FONT', 'LAYOUT'],
       },
     }));
   });

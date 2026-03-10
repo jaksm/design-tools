@@ -505,6 +505,20 @@ export async function designGenerate(
 const VALID_CREATIVE_RANGES = ['conservative', 'moderate', 'adventurous'] as const;
 type CreativeRange = (typeof VALID_CREATIVE_RANGES)[number];
 
+const CREATIVE_RANGE_MAP: Record<string, string> = {
+  conservative: 'REFINE',
+  moderate: 'EXPLORE',
+  adventurous: 'REIMAGINE',
+};
+
+const ASPECT_MAP: Record<string, string> = {
+  layout: 'LAYOUT',
+  color: 'COLOR_SCHEME',
+  images: 'IMAGES',
+  typography: 'TEXT_FONT',
+  content: 'TEXT_CONTENT',
+};
+
 export async function designVariants(
   params: DesignVariantsParams,
   ctx: StitchToolsContext,
@@ -559,11 +573,12 @@ export async function designVariants(
     // Build Stitch args
     const stitchArgs: Record<string, unknown> = {
       projectId,
-      screenId: params.screenId,
+      selectedScreenIds: [params.screenId],
+      prompt: `Generate ${variantCount} variant(s) of this screen`,
       variantOptions: {
         variantCount,
-        ...(params.creativeRange ? { creativeRange: params.creativeRange } : {}),
-        ...(params.aspects ? { aspects: params.aspects } : {}),
+        ...(params.creativeRange ? { creativeRange: CREATIVE_RANGE_MAP[params.creativeRange as CreativeRange] ?? params.creativeRange } : {}),
+        ...(params.aspects ? { aspects: params.aspects.map((a: string) => ASPECT_MAP[a] ?? a) } : {}),
       },
     };
 
@@ -1109,8 +1124,8 @@ export async function designCreateProject(
     }
 
     const project = result as StitchProjectResponse;
-    const projectId = project?.id ?? '';
-    const projectTitle = project?.name ?? project?.title ?? params.title;
+    const projectId = project?.id ?? project?.name?.split('projects/')[1] ?? '';
+    const projectTitle = project?.title ?? params.title;
 
     if (!projectId) {
       return err('Stitch API returned no project ID', 'STITCH_API_ERROR');

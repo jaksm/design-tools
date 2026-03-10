@@ -1,0 +1,30 @@
+{
+  "id": "design-tools",
+  "name": "Design Tools",
+  "description": "Design tooling for AI agents — Design Catalog, Design Vision, and Stitch Native Tools for Google Stitch.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "stitch": {
+        "type": "object",
+        "properties": {
+          "quotaProjectId": {
+            "type": "string",
+            "description": "GCP project ID for quota billing on Stitch API calls."
+          }
+        }
+      },
+      "gemini": {
+        "type": "object",
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "description": "Gemini API key for Design Vision tool. Falls back to GEMINI_API_KEY env var."
+          }
+        }
+      }
+    }
+  }
+}
