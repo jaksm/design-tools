@@ -500,6 +500,229 @@ export async function designGenerate(
   }
 }
 
+// ── 1b. design_variants ─────────────────────────────────────────────────────
+
+const VALID_CREATIVE_RANGES = ['conservative', 'moderate', 'adventurous'] as const;
+type CreativeRange = (typeof VALID_CREATIVE_RANGES)[number];
+
+export async function designVariants(
+  params: DesignVariantsParams,
+  ctx: StitchToolsContext,
+): Promise<ToolResult> {
+  try {
+    // Validate required params
+    if (!params.screenId) {
+      return err('Missing required parameter: `screenId`', 'MISSING_PARAM');
+    }
+
+    // Look up screen in registry
+    const registryEntry = await ctx.screenRegistry.findById(params.screenId);
+    if (!registryEntry) {
+      return err(
+        `Screen \`${params.screenId}\` not found in local registry. Use \`design_get\` to fetch it first, or check your screenId.`,
+        'NOT_FOUND',
+      );
+    }
+
+    // Resolve projectId
+    const projectId = params.projectId ?? registryEntry.projectId;
+
+    // Validate variantCount
+    const variantCount = params.variantCount ?? 2;
+    if (typeof variantCount !== 'number' || !Number.isInteger(variantCount) || variantCount < 1 || variantCount > 5) {
+      return err(
+        'Parameter `variantCount` must be an integer between 1 and 5',
+        'INVALID_PARAM',
+      );
+    }
+
+    // Validate creativeRange
+    if (params.creativeRange !== undefined) {
+      if (!VALID_CREATIVE_RANGES.includes(params.creativeRange as CreativeRange)) {
+        return err(
+          `Invalid creativeRange: \`${params.creativeRange}\`. Valid values: \`conservative\`, \`moderate\`, \`adventurous\``,
+          'INVALID_PARAM',
+        );
+      }
+    }
+
+    // Validate aspects
+    if (params.aspects !== undefined) {
+      if (!Array.isArray(params.aspects) || params.aspects.length === 0) {
+        return err('Parameter `aspects` must be a non-empty array of strings', 'INVALID_PARAM');
+      }
+      if (!params.aspects.every((a) => typeof a === 'string' && a.trim() !== '')) {
+        return err('Each element of `aspects` must be a non-empty string', 'INVALID_PARAM');
+      }
+    }
+
+    // Build Stitch args
+    const stitchArgs: Record<string, unknown> = {
+      projectId,
+      screenId: params.screenId,
+      variantOptions: {
+        variantCount,
+        ...(params.creativeRange ? { creativeRange: params.creativeRange } : {}),
+        ...(params.aspects ? { aspects: params.aspects } : {}),
+      },
+    };
+
+    if (params.modelId) {
+      stitchArgs.modelId = params.modelId;
+    }
+
+    // Call Stitch
+    let response: StitchGenerationResponse;
+    try {
+      response = await ctx.stitchClient.callTool('generate_variants', stitchArgs) as StitchGenerationResponse;
+      if (!response.outputComponents || response.outputComponents.length === 0) {
+        return err('No variants generated — Stitch returned empty outputComponents', 'STITCH_EMPTY_RESPONSE');
+      }
+    } catch (error) {
+      return formatStitchError(error);
+    }
+
+    // Phase 1: Extract valid screens from outputComponents
+    interface VariantData {
+      index: number;
+      screen: StitchScreenResponse;
+      title: string;
+      slug: string;
+      htmlPath: string;
+      screenshotPath: string;
+      screenDir: string;
+    }
+
+    const variantData: VariantData[] = [];
+    for (let i = 0; i < response.outputComponents.length; i++) {
+      const component = response.outputComponents[i]!;
+      const screen = component.design?.screens?.[0];
+      if (!screen) continue;
+
+      const variantTitle = `${registryEntry.title} variant ${i + 1}`;
+      const variantSlug = slugify(variantTitle);
+      variantData.push({
+        index: i,
+        screen,
+        title: variantTitle,
+        slug: variantSlug,
+        htmlPath: htmlRelPath(variantSlug, 1),
+        screenshotPath: screenshotRelPath(variantSlug, 1),
+        screenDir: path.resolve(ctx.projectRoot, screensRelPath(variantSlug)),
+      });
+    }
+
+    if (variantData.length === 0) {
+      return err('No valid variants found in Stitch response — all outputComponents were empty', 'STITCH_EMPTY_RESPONSE');
+    }
+
+    // Phase 2: Download all files (rollback all on any failure)
+    const downloadedDirs: string[] = [];
+    for (const vd of variantData) {
+      try {
+        if (!vd.screen.htmlCode?.downloadUrl) {
+          throw new Error('No HTML download URL in Stitch response');
+        }
+        await downloadHtml(vd.screen.htmlCode.downloadUrl, vd.htmlPath, ctx.projectRoot);
+        downloadedDirs.push(vd.screenDir);
+      } catch (error) {
+        for (const p of downloadedDirs) { await cleanupDir(p); }
+        await cleanupDir(vd.screenDir);
+        const message = error instanceof Error ? error.message : String(error);
+        return err(`Failed to download HTML for variant ${vd.index + 1}: ${message}`, 'DOWNLOAD_ERROR');
+      }
+
+      try {
+        if (!vd.screen.screenshot?.downloadUrl) {
+          throw new Error('No screenshot download URL in Stitch response');
+        }
+        await downloadScreenshot(vd.screen.screenshot.downloadUrl, vd.screenshotPath, ctx.projectRoot);
+      } catch (error) {
+        for (const p of downloadedDirs) { await cleanupDir(p); }
+        const message = error instanceof Error ? error.message : String(error);
+        return err(`Failed to download screenshot for variant ${vd.index + 1}: ${message}`, 'DOWNLOAD_ERROR');
+      }
+    }
+
+    // Phase 3: All downloads succeeded — write catalog + registry entries
+    const variants: Array<{
+      screenId: string;
+      title: string;
+      files: { html: string; screenshot: string };
+      catalogEntry: { id: string; screen: string; status: string; currentVersion: number };
+    }> = [];
+
+    const timestamp = now();
+    for (const vd of variantData) {
+      const catalogEntry = await withCatalogLock(ctx.projectRoot, async () => {
+        const catalog = await readCatalog(ctx.projectRoot);
+
+        const artifact: Artifact = {
+          id: `${vd.slug}-v1`,
+          screen: vd.slug,
+          description: `Variant ${vd.index + 1} of ${registryEntry.title}`,
+          status: 'draft',
+          currentVersion: 1,
+          versions: [
+            {
+              version: 1,
+              html: vd.htmlPath,
+              screenshot: vd.screenshotPath,
+              createdAt: timestamp,
+            },
+          ],
+          stitch: {
+            projectId,
+            screenId: vd.screen.id,
+          },
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+
+        catalog.artifacts.push(artifact);
+        await writeCatalog(ctx.projectRoot, catalog);
+        return artifact;
+      });
+
+      await ctx.screenRegistry.register({
+        id: vd.screen.id,
+        title: vd.title,
+        screen: vd.slug,
+        projectId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        currentVersion: 1,
+        files: {
+          html: vd.htmlPath,
+          screenshot: vd.screenshotPath,
+        },
+      });
+
+      variants.push({
+        screenId: vd.screen.id,
+        title: vd.title,
+        files: { html: vd.htmlPath, screenshot: vd.screenshotPath },
+        catalogEntry: {
+          id: catalogEntry.id,
+          screen: catalogEntry.screen,
+          status: catalogEntry.status,
+          currentVersion: catalogEntry.currentVersion,
+        },
+      });
+    }
+
+    return {
+      success: true,
+      sourceScreenId: params.screenId,
+      variantCount: variants.length,
+      variants,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return err(`Internal error: ${message}`, 'INTERNAL_ERROR');
+  }
+}
+
 // ── 2. design_edit ──────────────────────────────────────────────────────────
 
 export async function designEdit(

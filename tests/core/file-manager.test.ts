@@ -272,17 +272,18 @@ describe('Plugin Registration', () => {
     expect(() => register(api)).not.toThrow();
     expect(api.registerTool).toHaveBeenCalledOnce();
 
-    // 8 tools registered: design_catalog, design_vision, + 6 stitch native tools
+    // 9 tools registered: design_catalog, design_vision, + 7 stitch native tools
     expect(registeredTools.length).toBeGreaterThan(0);
-    expect(registeredTools[0]).toHaveLength(8);
+    expect(registeredTools[0]).toHaveLength(9);
     expect((registeredTools[0] as Array<{ name: string }>)[0]!.name).toBe('design_catalog');
     expect((registeredTools[0] as Array<{ name: string }>)[1]!.name).toBe('design_vision');
     expect((registeredTools[0] as Array<{ name: string }>)[2]!.name).toBe('design_generate');
-    expect((registeredTools[0] as Array<{ name: string }>)[3]!.name).toBe('design_edit');
-    expect((registeredTools[0] as Array<{ name: string }>)[4]!.name).toBe('design_get');
-    expect((registeredTools[0] as Array<{ name: string }>)[5]!.name).toBe('design_projects');
-    expect((registeredTools[0] as Array<{ name: string }>)[6]!.name).toBe('design_screens');
-    expect((registeredTools[0] as Array<{ name: string }>)[7]!.name).toBe('design_create_project');
+    expect((registeredTools[0] as Array<{ name: string }>)[3]!.name).toBe('design_variants');
+    expect((registeredTools[0] as Array<{ name: string }>)[4]!.name).toBe('design_edit');
+    expect((registeredTools[0] as Array<{ name: string }>)[5]!.name).toBe('design_get');
+    expect((registeredTools[0] as Array<{ name: string }>)[6]!.name).toBe('design_projects');
+    expect((registeredTools[0] as Array<{ name: string }>)[7]!.name).toBe('design_screens');
+    expect((registeredTools[0] as Array<{ name: string }>)[8]!.name).toBe('design_create_project');
   });
 
   // TC-PR-03: ADC-based auth — no API key needed, always creates StitchClient

@@ -13,6 +13,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   designGenerate,
+  designVariants,
   designEdit,
   designGet,
   designProjects,
@@ -20,6 +21,7 @@ import {
   designCreateProject,
   createStitchToolsContext,
   type DesignGenerateParams,
+  type DesignVariantsParams,
   type DesignEditParams,
   type DesignGetParams,
   type DesignCreateProjectParams,
@@ -589,6 +591,458 @@ describe('design_generate', () => {
 
     const callArgs = mockCallTool.mock.calls[0]![1] as Record<string, unknown>;
     expect(callArgs).not.toHaveProperty('modelId');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 1b. design_variants
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Helper to create a multi-variant Stitch response (multiple outputComponents).
+ */
+function makeStitchVariantsResponse(count: number, screenIdPrefix = 'variant') {
+  const outputComponents = [];
+  for (let i = 0; i < count; i++) {
+    outputComponents.push({
+      design: {
+        screens: [makeStitchScreenResponse({
+          id: `${screenIdPrefix}-${i + 1}`,
+          title: `Variant ${i + 1}`,
+          htmlCode: { downloadUrl: `https://cdn.example.com/variant-${i + 1}.html` },
+          screenshot: { downloadUrl: `https://cdn.example.com/variant-${i + 1}.png` },
+        })],
+        theme: { colorMode: 'LIGHT' },
+      },
+    });
+  }
+  return {
+    outputComponents,
+    projectId: 'proj-123',
+    sessionId: 'session-variants',
+  };
+}
+
+describe('design_variants', () => {
+  // TC-VAR-01: Successful variant generation with defaults
+  it('TC-VAR-01: successful variant generation with required screenId only', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(2));
+
+    const result = await designVariants({ screenId: 'screen-abc' }, ctx) as any;
+
+    expect(result.success).toBe(true);
+    expect(result.sourceScreenId).toBe('screen-abc');
+    expect(result.variantCount).toBe(2);
+    expect(result.variants).toHaveLength(2);
+
+    // Each variant has expected fields
+    for (const variant of result.variants) {
+      expect(variant.screenId).toBeDefined();
+      expect(variant.title).toBeDefined();
+      expect(variant.files.html).toMatch(/\.html$/);
+      expect(variant.files.screenshot).toMatch(/\.png$/);
+      expect(variant.catalogEntry.status).toBe('draft');
+      expect(variant.catalogEntry.currentVersion).toBe(1);
+    }
+
+    // Verify Stitch was called correctly
+    expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
+      projectId: 'proj-123',
+      screenId: 'screen-abc',
+      variantOptions: { variantCount: 2 },
+    }));
+  });
+
+  // TC-VAR-02: Missing screenId returns error
+  it('TC-VAR-02: missing screenId returns error', async () => {
+    const result = await designVariants({} as any, ctx);
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain('screenId');
+    expect((result as any).code).toBe('MISSING_PARAM');
+    expect(mockCallTool).not.toHaveBeenCalled();
+  });
+
+  // TC-VAR-03: Unknown screenId not in registry returns error
+  it('TC-VAR-03: unknown screenId not in registry returns error', async () => {
+    const result = await designVariants({ screenId: 'screen-xyz' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain('screen-xyz');
+    expect((result as any).error).toContain('not found');
+    expect(mockCallTool).not.toHaveBeenCalled();
+  });
+
+  // TC-VAR-04: Custom variantCount is forwarded
+  it('TC-VAR-04: custom variantCount is forwarded to Stitch', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(4));
+
+    const result = await designVariants({ screenId: 'screen-abc', variantCount: 4 }, ctx) as any;
+
+    expect(result.success).toBe(true);
+    expect(result.variantCount).toBe(4);
+    expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
+      variantOptions: expect.objectContaining({ variantCount: 4 }),
+    }));
+  });
+
+  // TC-VAR-05: variantCount out of range returns error
+  it('TC-VAR-05: variantCount 0 returns error', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+
+    const result = await designVariants({ screenId: 'screen-abc', variantCount: 0 }, ctx);
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain('variantCount');
+    expect(mockCallTool).not.toHaveBeenCalled();
+  });
+
+  it('TC-VAR-05b: variantCount 6 returns error', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+
+    const result = await designVariants({ screenId: 'screen-abc', variantCount: 6 }, ctx);
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain('variantCount');
+    expect(mockCallTool).not.toHaveBeenCalled();
+  });
+
+  // TC-VAR-06: creativeRange is forwarded
+  it('TC-VAR-06: creativeRange is forwarded to Stitch', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(2));
+
+    await designVariants({ screenId: 'screen-abc', creativeRange: 'adventurous' }, ctx);
+
+    expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
+      variantOptions: expect.objectContaining({ creativeRange: 'adventurous' }),
+    }));
+  });
+
+  // TC-VAR-07: invalid creativeRange returns error
+  it('TC-VAR-07: invalid creativeRange returns error', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+
+    const result = await designVariants({ screenId: 'screen-abc', creativeRange: 'wild' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain('creativeRange');
+    expect((result as any).error).toContain('wild');
+    expect(mockCallTool).not.toHaveBeenCalled();
+  });
+
+  // TC-VAR-08: aspects array is forwarded
+  it('TC-VAR-08: aspects array is forwarded to Stitch', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(2));
+
+    await designVariants({ screenId: 'screen-abc', aspects: ['color', 'layout'] }, ctx);
+
+    expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
+      variantOptions: expect.objectContaining({ aspects: ['color', 'layout'] }),
+    }));
+  });
+
+  // TC-VAR-09: empty aspects array returns error
+  it('TC-VAR-09: empty aspects array returns error', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+
+    const result = await designVariants({ screenId: 'screen-abc', aspects: [] }, ctx);
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain('aspects');
+    expect(mockCallTool).not.toHaveBeenCalled();
+  });
+
+  // TC-VAR-10: each variant gets its own catalog entry
+  it('TC-VAR-10: each variant gets its own catalog entry', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(3));
+
+    const result = await designVariants({ screenId: 'screen-abc', variantCount: 3 }, ctx) as any;
+
+    expect(result.success).toBe(true);
+
+    const catalog = await readCatalog();
+    // Original + 3 variants = 4 total
+    expect(catalog.artifacts).toHaveLength(4);
+
+    // Each variant has a unique screen slug
+    const variantScreens = result.variants.map((v: any) => v.catalogEntry.screen);
+    const uniqueScreens = new Set(variantScreens);
+    expect(uniqueScreens.size).toBe(3);
+  });
+
+  // TC-VAR-11: each variant gets its own screen registry entry
+  it('TC-VAR-11: each variant gets its own screen registry entry', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(2));
+
+    const result = await designVariants({ screenId: 'screen-abc' }, ctx) as any;
+
+    expect(result.success).toBe(true);
+
+    const registry = await readRegistry();
+    // Original + 2 variants = 3 total
+    expect(registry.screens).toHaveLength(3);
+
+    // Each variant screen ID should be in the registry
+    for (const variant of result.variants) {
+      const found = registry.screens.find((s: any) => s.id === variant.screenId);
+      expect(found).toBeDefined();
+    }
+  });
+
+  // TC-VAR-12: files exist on disk for each variant
+  it('TC-VAR-12: files exist on disk for each variant', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(2));
+
+    const result = await designVariants({ screenId: 'screen-abc' }, ctx) as any;
+
+    expect(result.success).toBe(true);
+
+    for (const variant of result.variants) {
+      const htmlFullPath = path.resolve(tmpDir, variant.files.html);
+      const ssFullPath = path.resolve(tmpDir, variant.files.screenshot);
+      await expect(fs.access(htmlFullPath)).resolves.toBeUndefined();
+      await expect(fs.access(ssFullPath)).resolves.toBeUndefined();
+    }
+  });
+
+  // TC-VAR-13: explicit projectId overrides registry value
+  it('TC-VAR-13: explicit projectId overrides registry value', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-old');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(2));
+
+    await designVariants({ screenId: 'screen-abc', projectId: 'proj-new' }, ctx);
+
+    expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
+      projectId: 'proj-new',
+    }));
+  });
+
+  // TC-VAR-14: modelId is forwarded when provided
+  it('TC-VAR-14: modelId is forwarded to Stitch', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(2));
+
+    await designVariants({ screenId: 'screen-abc', modelId: 'GEMINI_3_PRO' }, ctx);
+
+    expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
+      modelId: 'GEMINI_3_PRO',
+    }));
+  });
+
+  // TC-VAR-15: modelId is not sent when not provided
+  it('TC-VAR-15: modelId is optional and not sent when not provided', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(2));
+
+    await designVariants({ screenId: 'screen-abc' }, ctx);
+
+    const callArgs = mockCallTool.mock.calls[0]![1] as Record<string, unknown>;
+    expect(callArgs).not.toHaveProperty('modelId');
+  });
+
+  // TC-VAR-16: Stitch API error is handled gracefully
+  it('TC-VAR-16: Stitch API error is handled gracefully', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockRejectedValue(new StitchError('Internal error', { statusCode: 500 }));
+
+    const result = await designVariants({ screenId: 'screen-abc' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain('Stitch API error');
+    expect((result as any).code).toBe('STITCH_API_ERROR');
+
+    // No partial catalog entries (beyond the seeded one)
+    const catalog = await readCatalog();
+    expect(catalog.artifacts).toHaveLength(1);
+  });
+
+  // TC-VAR-17: empty outputComponents returns error
+  it('TC-VAR-17: empty outputComponents returns error', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue({
+      outputComponents: [],
+      projectId: 'proj-123',
+      sessionId: 'session-xyz',
+    });
+
+    const result = await designVariants({ screenId: 'screen-abc' }, ctx) as any;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('empty outputComponents');
+    expect(result.code).toBe('STITCH_EMPTY_RESPONSE');
+  });
+
+  // TC-VAR-18: download failure during variants → cleanup all previous
+  it('TC-VAR-18: download failure cleans up and returns error', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(3));
+
+    // Let first variant's downloads succeed, fail on second variant's HTML
+    let htmlCallCount = 0;
+    fetchSpy.mockImplementation(async (url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url;
+      if (urlStr.includes('html')) {
+        htmlCallCount++;
+        if (htmlCallCount === 2) {
+          throw new Error('Network error downloading HTML');
+        }
+        return new Response('<html>ok</html>', { status: 200 });
+      }
+      return new Response(Buffer.from('fake-png'), { status: 200 });
+    });
+
+    const result = await designVariants({ screenId: 'screen-abc' }, ctx) as any;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Failed to download HTML for variant 2');
+
+    // No new catalog entries should remain (only the seeded one)
+    const catalog = await readCatalog();
+    expect(catalog.artifacts).toHaveLength(1);
+  });
+
+  // TC-VAR-19: variant slugs are unique per variant
+  it('TC-VAR-19: variant slugs are unique per variant', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(3));
+
+    const result = await designVariants({ screenId: 'screen-abc', variantCount: 3 }, ctx) as any;
+
+    expect(result.success).toBe(true);
+    const slugs = result.variants.map((v: any) => v.catalogEntry.screen);
+    const uniqueSlugs = new Set(slugs);
+    expect(uniqueSlugs.size).toBe(3);
+    // All slugs should contain 'variant'
+    for (const slug of slugs) {
+      expect(slug).toContain('variant');
+    }
+  });
+
+  // TC-VAR-20: design_screens lists variants after generation
+  it('TC-VAR-20: design_screens lists variants after generation', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(2));
+
+    const varResult = await designVariants({ screenId: 'screen-abc' }, ctx) as any;
+    expect(varResult.success).toBe(true);
+
+    const screensResult = await designScreens({}, ctx) as any;
+    expect(screensResult.success).toBe(true);
+    // Original + 2 variants
+    expect(screensResult.screens.length).toBeGreaterThanOrEqual(3);
+  });
+
+  // TC-VAR-21: variant with single outputComponent works
+  it('TC-VAR-21: single variant (variantCount=1) works correctly', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(1));
+
+    const result = await designVariants({ screenId: 'screen-abc', variantCount: 1 }, ctx) as any;
+
+    expect(result.success).toBe(true);
+    expect(result.variantCount).toBe(1);
+    expect(result.variants).toHaveLength(1);
+  });
+
+  // TC-VAR-22: null/undefined params handled gracefully
+  it('TC-VAR-22: null params handled gracefully', async () => {
+    const result = await designVariants(null as any, ctx);
+    expect(result).toBeDefined();
+    expect(typeof result.success).toBe('boolean');
+  });
+
+  // TC-VAR-23: all optional variantOptions
+  it('TC-VAR-23: all variant options forwarded together', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(3));
+
+    await designVariants({
+      screenId: 'screen-abc',
+      variantCount: 3,
+      creativeRange: 'moderate',
+      aspects: ['color', 'typography', 'layout'],
+    }, ctx);
+
+    expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
+      variantOptions: {
+        variantCount: 3,
+        creativeRange: 'moderate',
+        aspects: ['color', 'typography', 'layout'],
+      },
+    }));
+  });
+
+  // TC-VAR-24: default variantCount is 2 when not specified
+  it('TC-VAR-24: default variantCount is 2 when not specified', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue(makeStitchVariantsResponse(2));
+
+    await designVariants({ screenId: 'screen-abc' }, ctx);
+
+    expect(mockCallTool).toHaveBeenCalledWith('generate_variants', expect.objectContaining({
+      variantOptions: { variantCount: 2 },
+    }));
+  });
+
+  // TC-VAR-25: outputComponents with missing design are skipped
+  it('TC-VAR-25: outputComponents with missing design are skipped', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue({
+      outputComponents: [
+        { suggestion: 'No design here' },
+        {
+          design: {
+            screens: [makeStitchScreenResponse({ id: 'var-1' })],
+          },
+        },
+        { text: 'Also no design' },
+      ],
+      projectId: 'proj-123',
+      sessionId: 'session-xyz',
+    });
+
+    const result = await designVariants({ screenId: 'screen-abc' }, ctx) as any;
+
+    expect(result.success).toBe(true);
+    expect(result.variantCount).toBe(1);
+    expect(result.variants).toHaveLength(1);
+  });
+
+  // TC-VAR-26: all outputComponents empty → error
+  it('TC-VAR-26: all outputComponents without design → error', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+    mockCallTool.mockResolvedValue({
+      outputComponents: [
+        { suggestion: 'No design' },
+        { text: 'Still no design' },
+      ],
+      projectId: 'proj-123',
+      sessionId: 'session-xyz',
+    });
+
+    const result = await designVariants({ screenId: 'screen-abc' }, ctx) as any;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No valid variants');
+    expect(result.code).toBe('STITCH_EMPTY_RESPONSE');
+  });
+
+  // TC-VAR-27: non-integer variantCount returns error
+  it('TC-VAR-27: non-integer variantCount returns error', async () => {
+    await seedCatalogWithScreen('login', 'screen-abc', 'proj-123');
+
+    const result = await designVariants({ screenId: 'screen-abc', variantCount: 2.5 }, ctx);
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain('variantCount');
+    expect(mockCallTool).not.toHaveBeenCalled();
   });
 });
 

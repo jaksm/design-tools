@@ -12,6 +12,7 @@ import { designVision, type DesignVisionParams } from './tools/design-vision.js'
 import { GeminiVisionClient } from './core/gemini-client.js';
 import {
   designGenerate,
+  designVariants,
   designEdit,
   designGet,
   designProjects,
@@ -19,6 +20,7 @@ import {
   designCreateProject,
   createStitchToolsContext,
   type DesignGenerateParams,
+  type DesignVariantsParams,
   type DesignEditParams,
   type DesignGetParams,
   type DesignProjectsParams,
@@ -39,6 +41,7 @@ export { designVision } from './tools/design-vision.js';
 export { GeminiVisionClient } from './core/gemini-client.js';
 export {
   designGenerate,
+  designVariants,
   designEdit,
   designGet,
   designProjects,
@@ -51,6 +54,7 @@ export type { DesignCatalogParams } from './tools/design-catalog.js';
 export type { DesignVisionParams } from './tools/design-vision.js';
 export type {
   DesignGenerateParams,
+  DesignVariantsParams,
   DesignEditParams,
   DesignGetParams,
   DesignProjectsParams,
@@ -233,6 +237,25 @@ export default function register(api: OpenClawPluginApi): void {
         },
       },
       {
+        name: 'design_variants',
+        description: 'Generate multiple visual variations of an existing screen via Stitch API. Each variant gets its own catalog entry and screen registry entry. Useful for design exploration.',
+        parameters: {
+          type: 'object',
+          properties: {
+            screenId: { type: 'string', description: 'Stitch screen ID to generate variants from (required)' },
+            projectId: { type: 'string', description: 'Stitch project ID (looked up from registry if not provided)' },
+            modelId: { type: 'string', enum: ['GEMINI_3_PRO', 'GEMINI_3_FLASH'], description: 'AI model to use for generation' },
+            variantCount: { type: 'number', description: 'Number of variants to generate (1-5, default 2)' },
+            creativeRange: { type: 'string', enum: ['conservative', 'moderate', 'adventurous'], description: 'How different variants should be from the original' },
+            aspects: { type: 'array', items: { type: 'string' }, description: 'Design aspects to vary (e.g. "color", "layout", "typography")' },
+          },
+          required: ['screenId'],
+        },
+        execute: async (params: DesignVariantsParams) => {
+          return designVariants(params, stitchCtx);
+        },
+      },
+      {
         name: 'design_edit',
         description: 'Edit an existing Stitch screen. Auto-downloads updated HTML + screenshot and versions in catalog.',
         parameters: {
@@ -306,5 +329,5 @@ export default function register(api: OpenClawPluginApi): void {
     ];
   });
 
-  api.logger.info('[design-tools] Plugin registered (8 tools: design_catalog, design_vision, design_generate, design_edit, design_get, design_projects, design_screens, design_create_project)');
+  api.logger.info('[design-tools] Plugin registered (9 tools: design_catalog, design_vision, design_generate, design_variants, design_edit, design_get, design_projects, design_screens, design_create_project)');
 }
