@@ -34,3 +34,12 @@ export {
   type DesignCreateProjectParams,
   type StitchToolsContext,
 } from "./stitch-tools.js";
+
+// ── Tool Metadata ────────────────────────────────────────────────────────────
+
+export {
+  toolMetadata,
+  allToolMetadata,
+  type ToolMetadataEntry,
+  type ToolId,
+} from "./metadata.js";
