@@ -1,20 +1,62 @@
 {
-  "name": "openclaw-design-tools",
+  "name": "@jaksm/design-tools",
   "version": "0.1.0",
-  "private": true,
-  "description": "Design tooling for AI agents — Design Catalog, Design Vision, and Stitch Native Tools.",
+  "description": "Design tooling for AI agents — Design Catalog, Gemini Vision analysis, and Google Stitch integration. Use as an OpenClaw plugin or import tools directly.",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "import": "./dist/tools/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    }
+  },
   "openclaw": {
     "extensions": [
       "./dist/index.js"
     ]
   },
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
     "clean": "rm -rf dist",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai-agent",
+    "design-tools",
+    "openclaw",
+    "stitch",
+    "gemini-vision",
+    "design-catalog",
+    "ui-design",
+    "ai-design"
+  ],
+  "author": "Jakša Mališić <jaksa.malisic@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jaksm/design-tools.git"
+  },
+  "homepage": "https://github.com/jaksm/design-tools#readme",
+  "bugs": {
+    "url": "https://github.com/jaksm/design-tools/issues"
   },
   "dependencies": {
     "google-auth-library": "^10.6.1"
@@ -23,5 +65,8 @@
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
